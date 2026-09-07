@@ -1,0 +1,24 @@
+.spectra/
+openspec/.vector-search.db*
+
+# Node / Next.js
+node_modules/
+.next/
+next-env.d.ts
+tsconfig.tsbuildinfo
+
+# next-pwa generated files
+public/sw.js
+public/sw.js.map
+public/workbox-*.js
+public/workbox-*.js.map
+
+# Env
+.env
+.env.local
+.env*.local
+
+# Test coverage
+coverage/
+
+.vercel

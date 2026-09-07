@@ -1,0 +1,217 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { Document, Page, pdfjs } from "react-pdf";
+import "react-pdf/dist/Page/AnnotationLayer.css";
+import "react-pdf/dist/Page/TextLayer.css";
+import { canGoNext, canGoPrevious, clampPage, nextPage, previousPage } from "@/lib/pdf/pagination";
+import AnnotationCanvas from "./AnnotationCanvas";
+import AnnotationToolbar, { PALETTE, WIDTHS } from "./AnnotationToolbar";
+import type { Stroke } from "@/lib/annotations/queries";
+import type { PdfDocumentProxy } from "@/lib/pdf/extract-full-text";
+
+pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+
+const DEFAULT_ASPECT_RATIO = 1.414; // A4 fallback until the real page loads
+
+export default function PdfViewer({
+  fileUrl,
+  onTextSelected,
+  onPageChange,
+  onReachedLastPage,
+  onPageTextLoaded,
+  strokes,
+  onStrokeComplete,
+  onEraseStroke,
+  onDocumentLoad,
+}: {
+  fileUrl: string;
+  onTextSelected?: (text: string) => void;
+  onPageChange?: (page: number) => void;
+  onReachedLastPage?: () => void;
+  onPageTextLoaded?: (text: string) => void;
+  strokes?: Stroke[];
+  onStrokeComplete?: (strokes: Stroke[]) => void;
+  onEraseStroke?: (index: number) => void;
+  onDocumentLoad?: (pdf: PdfDocumentProxy) => void;
+}) {
+  const [numPages, setNumPages] = useState(1);
+  const [documentLoaded, setDocumentLoaded] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageWidth, setPageWidth] = useState<number | undefined>(undefined);
+  const [pageAspectRatio, setPageAspectRatio] = useState(DEFAULT_ASPECT_RATIO);
+  const [penMode, setPenMode] = useState(false);
+  const [tool, setTool] = useState<"pen" | "eraser">("pen");
+  const [strokeColor, setStrokeColor] = useState(PALETTE[0]);
+  const [strokeWidth, setStrokeWidth] = useState(WIDTHS[1]);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const pageWrapperRef = useRef<HTMLDivElement>(null);
+
+  // Falls back to a sensible default width so the annotation canvas can
+  // still mount even before the container's real width has been measured
+  // (e.g. the very first paint, or in a test environment without layout).
+  const effectivePageWidth = pageWidth || 800;
+  const pageHeight = effectivePageWidth * pageAspectRatio;
+
+  useEffect(() => {
+    onPageChange?.(clampPage(currentPage, numPages));
+  }, [currentPage, numPages, onPageChange]);
+
+  useEffect(() => {
+    // `numPages` defaults to 1 as a placeholder before the real PDF has
+    // loaded (see useState above) — without the documentLoaded guard, the
+    // very first render (currentPage=1, placeholder numPages=1) would
+    // trivially satisfy "on the last page" before the actual page count
+    // is known, firing this for every single-page-or-more document.
+    if (documentLoaded && numPages > 0 && clampPage(currentPage, numPages) === numPages) {
+      onReachedLastPage?.();
+    }
+  }, [documentLoaded, currentPage, numPages, onReachedLastPage]);
+
+  useEffect(() => {
+    // Fit the rendered page to its container's width so it never overflows
+    // and forces horizontal scrolling on narrower screens (e.g. iPad).
+    function updateWidth() {
+      if (pageWrapperRef.current) {
+        setPageWidth(pageWrapperRef.current.clientWidth);
+      }
+    }
+
+    updateWidth();
+    window.addEventListener("resize", updateWidth);
+    return () => window.removeEventListener("resize", updateWidth);
+  }, []);
+
+  useEffect(() => {
+    // Toolbar selections do not persist across pen-mode sessions — every
+    // time the user re-enters pen mode, start from the pen tool and the
+    // default color/width rather than remembering the last session's pick.
+    if (penMode) {
+      setTool("pen");
+      setStrokeColor(PALETTE[0]);
+      setStrokeWidth(WIDTHS[1]);
+    }
+  }, [penMode]);
+
+  useEffect(() => {
+    if (!onTextSelected) return;
+    // Pen mode owns pointer/selection input on the page while active — skip
+    // reporting text selections so the two interaction modes never clash.
+    if (penMode) return;
+
+    function handleSelectionChange() {
+      const selection = window.getSelection();
+      if (!selection || selection.isCollapsed) return;
+
+      // Only report selections made inside this viewer's rendered PDF text
+      // layer, not selections elsewhere on the page.
+      const anchorNode = selection.anchorNode;
+      if (!anchorNode || !containerRef.current?.contains(anchorNode)) return;
+
+      const text = selection.toString();
+      if (text) {
+        onTextSelected!(text);
+      }
+    }
+
+    document.addEventListener("selectionchange", handleSelectionChange);
+    return () => document.removeEventListener("selectionchange", handleSelectionChange);
+  }, [onTextSelected, penMode]);
+
+  // pdf.js's real TextContent.items is (TextItem | TextMarkedContent)[] —
+  // only TextItem has `str`, so this is deliberately untyped at the
+  // boundary and reads the field defensively at runtime instead of trying
+  // to model pdf.js's full type surface. Same for getViewport's return
+  // shape — only `.width`/`.height` are read.
+  async function handlePageLoadSuccess(page: {
+    getTextContent: () => Promise<unknown>;
+    getViewport: (params: { scale: number }) => { width: number; height: number };
+  }) {
+    const viewport = page.getViewport({ scale: 1 });
+    if (viewport.width > 0) {
+      setPageAspectRatio(viewport.height / viewport.width);
+    }
+
+    if (!onPageTextLoaded) return;
+    const textContent = (await page.getTextContent()) as { items?: { str?: string }[] };
+    const text = (textContent.items ?? []).map((item) => item.str ?? "").join(" ");
+    onPageTextLoaded(text);
+  }
+
+  return (
+    <div className="pdf-viewer" ref={containerRef}>
+      <div
+        className={`pdf-viewer-page${penMode ? " pen-mode-active" : ""}`}
+        ref={pageWrapperRef}
+      >
+        <div style={{ position: "relative" }}>
+          <Document
+            file={fileUrl}
+            onLoadSuccess={(pdf) => {
+              setNumPages(pdf.numPages);
+              setDocumentLoaded(true);
+              onDocumentLoad?.(pdf);
+            }}
+          >
+            <Page
+              pageNumber={clampPage(currentPage, numPages)}
+              width={pageWidth}
+              onLoadSuccess={handlePageLoadSuccess}
+            />
+          </Document>
+          {penMode && (
+            // pdf.js's own TextLayer/AnnotationLayer set z-index: 2/3 in
+            // their CSS — without an explicit z-index here, this overlay
+            // sits below them in stacking order despite coming later in
+            // the DOM, so pointer input silently falls through to text
+            // selection / native scroll instead of reaching the canvas.
+            <div style={{ position: "absolute", top: 0, left: 0, zIndex: 10 }}>
+              <AnnotationCanvas
+                width={effectivePageWidth}
+                height={pageHeight}
+                strokes={strokes ?? []}
+                onStrokeComplete={(newStrokes) => onStrokeComplete?.(newStrokes)}
+                strokeColor={strokeColor}
+                strokeWidth={strokeWidth}
+                tool={tool}
+                onEraseStroke={(index) => onEraseStroke?.(index)}
+              />
+            </div>
+          )}
+        </div>
+      </div>
+      {penMode && (
+        <AnnotationToolbar
+          tool={tool}
+          color={strokeColor}
+          width={strokeWidth}
+          onToolChange={setTool}
+          onColorChange={setStrokeColor}
+          onWidthChange={setStrokeWidth}
+        />
+      )}
+      <div className="pdf-viewer-controls">
+        <button
+          type="button"
+          onClick={() => setCurrentPage((page) => previousPage(page, numPages))}
+          disabled={!canGoPrevious(currentPage)}
+        >
+          上一頁
+        </button>
+        <span>
+          {currentPage} / {numPages}
+        </span>
+        <button
+          type="button"
+          onClick={() => setCurrentPage((page) => nextPage(page, numPages))}
+          disabled={!canGoNext(currentPage, numPages)}
+        >
+          下一頁
+        </button>
+        <button type="button" onClick={() => setPenMode((mode) => !mode)}>
+          {penMode ? "關閉畫筆模式" : "畫筆模式"}
+        </button>
+      </div>
+    </div>
+  );
+}
