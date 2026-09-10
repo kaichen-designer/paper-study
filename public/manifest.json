@@ -1,7 +1,7 @@
 {
   "name": "Paper Reading PWA",
   "short_name": "PaperReader",
-  "start_url": "/",
+  "start_url": "/library",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#111111",
