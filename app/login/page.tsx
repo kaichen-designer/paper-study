@@ -1,10 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { requestMagicLink } from "@/lib/auth/request-magic-link";
 
-export default function LoginPage() {
+function CallbackError() {
+  const searchParams = useSearchParams();
+  const callbackError = searchParams.get("error");
+  if (!callbackError) return null;
+  return <p role="alert">{callbackError}</p>;
+}
+
+function LoginForm() {
   const [email, setEmail] = useState("");
   const [status, setStatus] = useState<
     { kind: "idle" } | { kind: "sent" } | { kind: "error"; message: string }
@@ -19,8 +27,7 @@ export default function LoginPage() {
   }
 
   return (
-    <main>
-      <h1>登入 Paper Reading PWA</h1>
+    <>
       <form className="login-form" onSubmit={handleSubmit}>
         <div>
           <label htmlFor="email">Email</label>
@@ -36,6 +43,20 @@ export default function LoginPage() {
       </form>
       {status.kind === "sent" && <p>登入連結已寄出,請至信箱確認。</p>}
       {status.kind === "error" && <p role="alert">{status.message}</p>}
+      {status.kind === "idle" && (
+        <Suspense fallback={null}>
+          <CallbackError />
+        </Suspense>
+      )}
+    </>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <main>
+      <h1>登入 Paper Reading PWA</h1>
+      <LoginForm />
     </main>
   );
 }
