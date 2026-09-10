@@ -1,13 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
-import PaperList from "./PaperList";
-import type { Paper } from "@/lib/papers/queries";
+import PaperList, { type PaperWithFileUrl } from "./PaperList";
 
-const paper = (overrides: Partial<Paper>): Paper => ({
+vi.mock("./PaperThumbnail", () => ({
+  default: () => <div data-testid="paper-thumbnail" />,
+}));
+
+const paper = (overrides: Partial<PaperWithFileUrl>): PaperWithFileUrl => ({
   id: "p1",
   user_id: "u1",
   title: "Attention Is All You Need",
   storage_path: "u1/attention.pdf",
+  fileUrl: "https://example.com/attention.pdf",
   uploaded_at: "2026-08-20T00:00:00.000Z",
   metadata: {},
   reached_last_page: false,
@@ -74,5 +78,14 @@ describe("PaperList", () => {
     );
     expect(screen.getByText("✅ 已讀完")).toBeInTheDocument();
     expect(screen.getByText("📥 已匯入")).toBeInTheDocument();
+  });
+
+  it("renders a cover thumbnail for each paper card", () => {
+    render(
+      <PaperList
+        papers={[paper({ id: "p1", title: "Paper One" }), paper({ id: "p2", title: "Paper Two" })]}
+      />
+    );
+    expect(screen.getAllByTestId("paper-thumbnail")).toHaveLength(2);
   });
 });

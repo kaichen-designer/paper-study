@@ -1,4 +1,16 @@
-const PUBLIC_PATH_PREFIXES = ["/login", "/auth/callback", "/_next", "/manifest.json", "/sw.js", "/workbox-"];
+const PUBLIC_PATH_PREFIXES = [
+  "/login",
+  "/auth/callback",
+  "/_next",
+  "/manifest.json",
+  "/sw.js",
+  "/workbox-",
+  "/swe-worker-",
+  "/icon-192.png",
+  "/icon-512.png",
+  "/apple-touch-icon.png",
+  "/splash/",
+];
 
 function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATH_PREFIXES.some((prefix) => pathname.startsWith(prefix));

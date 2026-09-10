@@ -25,4 +25,21 @@ describe("shouldRedirectToLogin", () => {
       false
     );
   });
+
+  it("never redirects home-screen icons or iPad splash images, so iOS's Add to Home Screen fetch (unauthenticated) succeeds", () => {
+    expect(shouldRedirectToLogin({ pathname: "/icon-192.png", hasSession: false })).toBe(false);
+    expect(shouldRedirectToLogin({ pathname: "/icon-512.png", hasSession: false })).toBe(false);
+    expect(shouldRedirectToLogin({ pathname: "/apple-touch-icon.png", hasSession: false })).toBe(
+      false
+    );
+    expect(
+      shouldRedirectToLogin({ pathname: "/splash/apple-splash-2048-2732.png", hasSession: false })
+    ).toBe(false);
+  });
+
+  it("never redirects the next-pwa service worker's runtime chunk (content-hashed filename), so the browser doesn't try to execute a login-page redirect as JavaScript", () => {
+    expect(
+      shouldRedirectToLogin({ pathname: "/swe-worker-5c72df51bb1f6ee0.js", hasSession: false })
+    ).toBe(false);
+  });
 });

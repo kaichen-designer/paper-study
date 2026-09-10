@@ -1,3 +1,13 @@
+:root {
+  --color-cream: #f5f2ea;
+  --color-cream-card: #ffffff;
+  --color-ink: #1c1c1a;
+  --color-ink-soft: #2a2a26;
+  --color-border: #e3ddcd;
+  --radius-pill: 999px;
+  --radius-card: 16px;
+}
+
 *,
 *::before,
 *::after {
@@ -7,9 +17,15 @@
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", sans-serif;
-  color: #1a1a1a;
-  background: #f7f7f5;
+  color: var(--color-ink);
+  background: var(--color-cream);
   -webkit-tap-highlight-color: transparent;
+  /* Keeps content clear of rounded corners/home indicator when launched
+     standalone on iPad (viewport-fit=cover in app/layout.tsx). */
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
 }
 
 main {
@@ -62,11 +78,11 @@ textarea {
 
 button {
   font-size: 0.95rem;
-  padding: 0.55rem 1.1rem;
+  padding: 0.55rem 1.25rem;
   min-height: 44px;
-  border: 1px solid #1a1a1a;
-  border-radius: 6px;
-  background: #1a1a1a;
+  border: 1px solid var(--color-ink);
+  border-radius: var(--radius-pill);
+  background: var(--color-ink);
   color: #fff;
   cursor: pointer;
 }
@@ -90,9 +106,9 @@ button:disabled {
   gap: 0.75rem;
   margin-bottom: 1.5rem;
   padding: 1rem;
-  background: #fff;
-  border-radius: 8px;
-  border: 1px solid #e5e5e0;
+  background: var(--color-cream-card);
+  border-radius: var(--radius-card);
+  border: 1px solid var(--color-border);
 }
 
 .paper-upload-form label {
@@ -101,26 +117,66 @@ button:disabled {
   margin-bottom: 0.25rem;
 }
 
-.paper-list {
+.paper-grid {
   list-style: none;
   margin: 0;
   padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 1.25rem 1rem;
+}
+
+.paper-card {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
 }
 
-.paper-list li {
-  background: #fff;
-  border: 1px solid #e5e5e0;
-  border-radius: 8px;
-  padding: 0.85rem 1rem;
+.paper-card-link {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  color: var(--color-ink);
+  text-decoration: none;
 }
 
-.paper-list a {
-  color: #1a1a1a;
+.paper-card-thumbnail {
+  display: flex;
+  justify-content: center;
+  background: var(--color-cream-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+  aspect-ratio: 3 / 4;
+}
+
+.paper-card-thumbnail canvas {
+  height: 100% !important;
+  width: auto !important;
+  object-fit: contain;
+}
+
+.paper-card-thumbnail-fallback {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  object-fit: none;
+  object-position: center;
+  background: var(--color-ink-soft);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  padding: 2.5rem;
+}
+
+.paper-card-title {
   font-weight: 600;
-  text-decoration: none;
+  font-size: 0.9rem;
+  line-height: 1.35;
+}
+
+.paper-card-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
 }
 
 /* --- Paper reader layout --- */
@@ -129,6 +185,9 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
+  background: var(--color-ink);
+  border-radius: var(--radius-card);
+  padding: 1rem;
 }
 
 .reading-status {
@@ -176,9 +235,7 @@ button:disabled {
 }
 
 .pdf-viewer {
-  background: #fff;
-  border: 1px solid #e5e5e0;
-  border-radius: 8px;
+  border-radius: var(--radius-card);
   overflow: hidden;
 }
 
@@ -187,7 +244,7 @@ button:disabled {
   overflow: auto;
   display: flex;
   justify-content: center;
-  background: #3a3a3a;
+  background: var(--color-ink-soft);
   padding: 1rem 0;
 }
 
@@ -214,8 +271,9 @@ button:disabled {
   align-items: center;
   gap: 1rem;
   padding: 0.6rem 0.75rem;
-  background: #fff6e6;
-  border-top: 1px solid #e5e5e0;
+  margin-top: 0.75rem;
+  background: var(--color-cream-card);
+  border-radius: var(--radius-pill);
 }
 
 .annotation-toolbar-group {
@@ -228,9 +286,9 @@ button:disabled {
   min-height: 44px;
   min-width: 44px;
   padding: 0.4rem 0.6rem;
-  background: #fff;
-  color: #1a1a1a;
-  border: 1px solid #d0d0cc;
+  background: var(--color-cream);
+  color: var(--color-ink);
+  border: 1px solid var(--color-border);
 }
 
 .annotation-toolbar button.annotation-toolbar-selected {
@@ -268,14 +326,24 @@ button:disabled {
   align-items: center;
   justify-content: center;
   gap: 1rem;
-  padding: 0.75rem;
-  border-top: 1px solid #e5e5e0;
+  margin: 0.75rem auto 0;
+  padding: 0.6rem 1.25rem;
+  width: fit-content;
+  background: var(--color-cream-card);
+  border-radius: var(--radius-pill);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  color: var(--color-ink);
+}
+
+.pdf-viewer-controls button {
+  padding: 0.4rem 0.9rem;
+  min-height: 36px;
 }
 
 .translation-panel {
-  background: #fff;
-  border: 1px solid #e5e5e0;
-  border-radius: 8px;
+  background: var(--color-cream-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
   padding: 1rem;
 }
 
