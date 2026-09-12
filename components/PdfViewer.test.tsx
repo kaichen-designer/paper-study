@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
 // Text extraction from a Range is covered in isolation by
@@ -6,6 +6,14 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 // wires selectionchange -> getSelectionText -> onTextSelected correctly.
 vi.mock("@/lib/pdf/selection-text", () => ({
   getSelectionText: () => "selected excerpt",
+}));
+
+// Sentence-bounds logic is covered in isolation by
+// lib/pdf/sentence-selection.test.ts — here we only need to verify
+// PdfViewer wires a tap -> expandToSentence -> onTextSelected correctly.
+const expandToSentenceMock = vi.fn();
+vi.mock("@/lib/pdf/sentence-selection", () => ({
+  expandToSentence: (...args: unknown[]) => expandToSentenceMock(...args),
 }));
 
 vi.mock("react-pdf", () => ({
@@ -77,6 +85,10 @@ vi.mock("./AnnotationCanvas", () => ({
 import PdfViewer from "./PdfViewer";
 
 describe("PdfViewer", () => {
+  beforeEach(() => {
+    expandToSentenceMock.mockClear();
+  });
+
   it("renders the first page by default once the document loads", () => {
     render(<PdfViewer fileUrl="/papers/example.pdf" />);
     expect(screen.getByTestId("page")).toHaveTextContent("頁面 1");
@@ -165,6 +177,63 @@ describe("PdfViewer", () => {
 
     expect(onTextSelected).toHaveBeenCalledWith("selected excerpt");
     getSelectionSpy.mockRestore();
+  });
+
+  it("selects the whole sentence under a single tap, as an alternative to dragging a precise range", () => {
+    const onTextSelected = vi.fn();
+    const fakeRange = {} as Range;
+    expandToSentenceMock.mockReturnValue(fakeRange);
+    const addRange = vi.fn();
+    const removeAllRanges = vi.fn();
+    const getSelectionSpy = vi
+      .spyOn(window, "getSelection")
+      .mockReturnValue({ isCollapsed: true, addRange, removeAllRanges } as unknown as Selection);
+
+    render(<PdfViewer fileUrl="/papers/example.pdf" onTextSelected={onTextSelected} />);
+
+    const textNode = document.createTextNode("some pdf text");
+    screen.getByTestId("document").appendChild(textNode);
+    const caretRangeFromPointSpy = vi
+      .fn()
+      .mockReturnValue({ startContainer: textNode, startOffset: 3 } as unknown as Range);
+    Object.defineProperty(document, "caretRangeFromPoint", {
+      value: caretRangeFromPointSpy,
+      configurable: true,
+    });
+
+    fireEvent.click(document.querySelector(".pdf-viewer-page")!, { clientX: 10, clientY: 20 });
+
+    expect(expandToSentenceMock).toHaveBeenCalledWith(expect.anything(), textNode, 3);
+    expect(removeAllRanges).toHaveBeenCalled();
+    expect(addRange).toHaveBeenCalledWith(fakeRange);
+    expect(onTextSelected).toHaveBeenCalledWith("selected excerpt");
+
+    getSelectionSpy.mockRestore();
+    // @ts-expect-error -- test-only cleanup of a property defined for this test
+    delete document.caretRangeFromPoint;
+  });
+
+  it("does not select a sentence on tap when the click already left behind a real drag-selection", () => {
+    const onTextSelected = vi.fn();
+    const getSelectionSpy = vi
+      .spyOn(window, "getSelection")
+      .mockReturnValue({ isCollapsed: false } as unknown as Selection);
+
+    render(<PdfViewer fileUrl="/papers/example.pdf" onTextSelected={onTextSelected} />);
+    fireEvent.click(document.querySelector(".pdf-viewer-page")!, { clientX: 10, clientY: 20 });
+
+    expect(expandToSentenceMock).not.toHaveBeenCalled();
+    getSelectionSpy.mockRestore();
+  });
+
+  it("does not select a sentence on tap while pen mode is on", () => {
+    const onTextSelected = vi.fn();
+    render(<PdfViewer fileUrl="/papers/example.pdf" onTextSelected={onTextSelected} />);
+    fireEvent.click(screen.getByRole("button", { name: /畫筆模式/ }));
+
+    fireEvent.click(document.querySelector(".pdf-viewer-page")!, { clientX: 10, clientY: 20 });
+
+    expect(expandToSentenceMock).not.toHaveBeenCalled();
   });
 
   it("reports the loaded PDF document object via onDocumentLoad, for full-text extraction", () => {

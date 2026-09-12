@@ -6,6 +6,7 @@ import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
 import { canGoNext, canGoPrevious, clampPage, nextPage, previousPage } from "@/lib/pdf/pagination";
 import { getSelectionText } from "@/lib/pdf/selection-text";
+import { expandToSentence } from "@/lib/pdf/sentence-selection";
 import AnnotationCanvas from "./AnnotationCanvas";
 import AnnotationToolbar, { PALETTE, WIDTHS } from "./AnnotationToolbar";
 import type { Stroke } from "@/lib/annotations/queries";
@@ -124,6 +125,38 @@ export default function PdfViewer({
     return () => document.removeEventListener("selectionchange", handleSelectionChange);
   }, [onTextSelected, penMode]);
 
+  // A single tap (not a drag) selects the whole sentence under it, as an
+  // alternative to dragging a precise range on pdf.js's tightly-packed
+  // text layer — imprecise on a touchscreen and easy to over/under-select.
+  // Only acts when the tap didn't already leave behind a real (non-
+  // collapsed) selection, so this never fights a genuine drag-selection.
+  function handleClick(event: React.MouseEvent) {
+    if (!onTextSelected || penMode) return;
+
+    const selection = window.getSelection();
+    if (selection && !selection.isCollapsed) return;
+
+    const caretRange = document.caretRangeFromPoint?.(event.clientX, event.clientY);
+    const caretNode = caretRange?.startContainer;
+    if (!caretRange || !caretNode || caretNode.nodeType !== Node.TEXT_NODE) return;
+    if (!containerRef.current?.contains(caretNode)) return;
+
+    const sentenceRange = expandToSentence(
+      containerRef.current,
+      caretNode as Text,
+      caretRange.startOffset
+    );
+    if (!sentenceRange) return;
+
+    selection?.removeAllRanges();
+    selection?.addRange(sentenceRange);
+
+    const text = getSelectionText(sentenceRange, containerRef.current);
+    if (text) {
+      onTextSelected(text);
+    }
+  }
+
   // pdf.js's real TextContent.items is (TextItem | TextMarkedContent)[] —
   // only TextItem has `str`, so this is deliberately untyped at the
   // boundary and reads the field defensively at runtime instead of trying
@@ -149,6 +182,7 @@ export default function PdfViewer({
       <div
         className={`pdf-viewer-page${penMode ? " pen-mode-active" : ""}`}
         ref={pageWrapperRef}
+        onClick={handleClick}
       >
         <div style={{ position: "relative" }}>
           <Document
