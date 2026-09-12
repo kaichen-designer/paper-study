@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { denormalizePoint, normalizePoint, type Point } from "@/lib/annotations/stroke-geometry";
 import type { Stroke } from "@/lib/annotations/queries";
 import { doesEraserPathIntersectStroke } from "@/lib/annotations/stroke-hit-test";
@@ -35,6 +35,13 @@ function pointsAttribute(points: Point[]): string {
  * directly (via ref) instead of through React state — going through
  * setState + re-render on every pointermove added enough latency to make
  * fast handwriting visibly lag behind the physical pen.
+ *
+ * A just-finished stroke is kept in `pendingStrokes` (optimistic, rendered
+ * like any other saved stroke) until the `strokes` prop actually reflects
+ * it — `onStrokeComplete` triggers an async save in the parent, and without
+ * this the stroke would flash empty for however long that round-trip takes
+ * (the live-preview polyline clears immediately on pointer-up, but the
+ * "real" strokes.map() render doesn't have it yet either).
  */
 export default function AnnotationCanvas({
   width,
@@ -60,6 +67,15 @@ export default function AnnotationCanvas({
   const drawingPointsRef = useRef<Point[]>([]);
   const surfaceRef = useRef<SVGSVGElement>(null);
   const liveStrokeRef = useRef<SVGPolylineElement>(null);
+  const [pendingStrokes, setPendingStrokes] = useState<Stroke[]>([]);
+
+  // Once the parent's `strokes` prop changes at all, treat every pending
+  // optimistic stroke as reconciled — either it's the round-trip we were
+  // waiting for, or the page changed and the pending strokes no longer
+  // apply anyway.
+  useEffect(() => {
+    setPendingStrokes([]);
+  }, [strokes]);
 
   function toLocalPoint(event: { clientX: number; clientY: number }): Point {
     const rect = surfaceRef.current!.getBoundingClientRect();
@@ -108,7 +124,9 @@ export default function AnnotationCanvas({
       const normalized = drawingPointsRef.current.map((point) =>
         normalizePoint(point, width, height)
       );
-      onStrokeComplete([{ points: normalized, color: strokeColor, width: strokeWidth }]);
+      const stroke: Stroke = { points: normalized, color: strokeColor, width: strokeWidth };
+      setPendingStrokes((current) => [...current, stroke]);
+      onStrokeComplete([stroke]);
     }
     drawingPointsRef.current = [];
     liveStrokeRef.current?.setAttribute("points", "");
@@ -165,7 +183,18 @@ export default function AnnotationCanvas({
       />
       {strokes.map((stroke, index) => (
         <polyline
-          key={index}
+          key={`saved-${index}`}
+          points={toPolylinePoints(stroke)}
+          fill="none"
+          stroke={stroke.color ?? DEFAULT_STROKE_COLOR}
+          strokeWidth={stroke.width ?? DEFAULT_STROKE_WIDTH}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      ))}
+      {pendingStrokes.map((stroke, index) => (
+        <polyline
+          key={`pending-${index}`}
           points={toPolylinePoints(stroke)}
           fill="none"
           stroke={stroke.color ?? DEFAULT_STROKE_COLOR}

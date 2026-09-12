@@ -5,20 +5,19 @@ import AnnotationCanvas from "./AnnotationCanvas";
 function setupCanvas(overrides: Partial<Parameters<typeof AnnotationCanvas>[0]> = {}) {
   const onStrokeComplete = vi.fn();
   const onEraseStroke = vi.fn();
-  render(
-    <AnnotationCanvas
-      width={800}
-      height={600}
-      strokes={[]}
-      onStrokeComplete={onStrokeComplete}
-      strokeColor="#e63946"
-      strokeWidth={2}
-      tool="pen"
-      onEraseStroke={onEraseStroke}
-      interactive={true}
-      {...overrides}
-    />
-  );
+  const baseProps = {
+    width: 800,
+    height: 600,
+    strokes: [],
+    onStrokeComplete,
+    strokeColor: "#e63946",
+    strokeWidth: 2,
+    tool: "pen" as const,
+    onEraseStroke,
+    interactive: true,
+    ...overrides,
+  };
+  const { rerender } = render(<AnnotationCanvas {...baseProps} />);
   const surface = screen.getByTestId("annotation-canvas-surface");
   vi.spyOn(surface, "getBoundingClientRect").mockReturnValue({
     left: 0,
@@ -31,7 +30,13 @@ function setupCanvas(overrides: Partial<Parameters<typeof AnnotationCanvas>[0]> 
     y: 0,
     toJSON: () => {},
   });
-  return { surface, onStrokeComplete, onEraseStroke };
+  return {
+    surface,
+    onStrokeComplete,
+    onEraseStroke,
+    rerenderWith: (next: Partial<Parameters<typeof AnnotationCanvas>[0]>) =>
+      rerender(<AnnotationCanvas {...baseProps} {...next} />),
+  };
 }
 
 describe("AnnotationCanvas", () => {
@@ -206,5 +211,36 @@ describe("AnnotationCanvas", () => {
       '[data-testid="annotation-live-stroke"]'
     ) as SVGPolylineElement;
     expect(livePolyline.getAttribute("points")).toBe("80,60 400,300");
+  });
+
+  it("keeps the just-finished stroke visible immediately on pointer-up, before the parent's strokes prop has caught up (no disappear/reappear flicker while the save round-trips)", () => {
+    const { surface } = setupCanvas();
+
+    fireEvent.pointerDown(surface, { clientX: 80, clientY: 60, pointerType: "pen" });
+    fireEvent.pointerMove(surface, { clientX: 400, clientY: 300, pointerType: "pen" });
+    fireEvent.pointerUp(surface, { clientX: 400, clientY: 300, pointerType: "pen" });
+
+    // `strokes` prop is still [] at this point (the parent hasn't
+    // persisted/echoed it back yet) — the finished stroke must still be
+    // painted somewhere.
+    const visiblePoints = [...document.querySelectorAll("polyline")].map((el) =>
+      el.getAttribute("points")
+    );
+    expect(visiblePoints).toContain("80,60 400,300");
+  });
+
+  it("drops the optimistic copy once the parent's strokes prop actually includes the saved stroke, instead of rendering it twice", () => {
+    const { surface, rerenderWith } = setupCanvas();
+
+    fireEvent.pointerDown(surface, { clientX: 80, clientY: 60, pointerType: "pen" });
+    fireEvent.pointerMove(surface, { clientX: 400, clientY: 300, pointerType: "pen" });
+    fireEvent.pointerUp(surface, { clientX: 400, clientY: 300, pointerType: "pen" });
+
+    rerenderWith({ strokes: [{ points: [{ x: 0.1, y: 0.1 }, { x: 0.5, y: 0.5 }] }] });
+
+    const matching = [...document.querySelectorAll("polyline")].filter(
+      (el) => el.getAttribute("points") === "80,60 400,300"
+    );
+    expect(matching).toHaveLength(1);
   });
 });
