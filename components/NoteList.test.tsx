@@ -27,7 +27,7 @@ describe("NoteList", () => {
     expect(screen.getByText(/尚未有筆記/)).toBeInTheDocument();
   });
 
-  it("shows a placeholder label for a stroke-based (hand-drawn) note instead of rendering empty text", () => {
+  it("does not list stroke-based (hand-drawn) notes — they're already visible as ink on the page itself", () => {
     render(
       <NoteList
         notes={[
@@ -38,6 +38,28 @@ describe("NoteList", () => {
         ]}
       />
     );
-    expect(screen.getByText("(手寫畫記)")).toBeInTheDocument();
+    expect(screen.queryByText("(手寫畫記)")).not.toBeInTheDocument();
+  });
+
+  it("shows the empty state when every note is stroke-based, not an empty list", () => {
+    render(
+      <NoteList
+        notes={[note({ note_text: null, strokes: [{ points: [{ x: 0.1, y: 0.1 }] }] })]}
+      />
+    );
+    expect(screen.getByText(/尚未有筆記/)).toBeInTheDocument();
+  });
+
+  it("still lists text notes alongside stroke-based notes, only hiding the stroke ones", () => {
+    render(
+      <NoteList
+        notes={[
+          note({ id: "n1", note_text: "文字筆記", strokes: null }),
+          note({ id: "n2", note_text: null, strokes: [{ points: [{ x: 0.1, y: 0.1 }] }] }),
+        ]}
+      />
+    );
+    expect(screen.getByText("文字筆記")).toBeInTheDocument();
+    expect(screen.queryByText("(手寫畫記)")).not.toBeInTheDocument();
   });
 });

@@ -200,7 +200,11 @@ describe("PaperReader", () => {
       { paperId: "p1", pageNumber: 1, strokes: [{ points: [{ x: 0.1, y: 0.1 }] }] }
     );
 
-    await waitFor(() => expect(screen.getByText("(手寫畫記)")).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByTestId("strokes-for-current-page")).toHaveTextContent(
+        JSON.stringify([{ points: [{ x: 0.1, y: 0.1 }] }])
+      )
+    );
   });
 
   it("saves a stroke's color/width via createStrokeNote exactly as reported by PdfViewer, without stripping them", async () => {
@@ -245,12 +249,16 @@ describe("PaperReader", () => {
     };
 
     render(<PaperReader fileUrl="/x.pdf" paperId="p1" initialNotes={[strokeNote]} />);
-    expect(screen.getByText("(手寫畫記)")).toBeInTheDocument();
+    expect(screen.getByTestId("strokes-for-current-page")).toHaveTextContent(
+      JSON.stringify([{ points: [{ x: 0.2, y: 0.2 }] }])
+    );
 
     fireEvent.click(screen.getByText("simulate-erase-stroke-0"));
 
     expect(deleteStrokeNoteMock).toHaveBeenCalledWith({}, "n6");
-    await waitFor(() => expect(screen.queryByText("(手寫畫記)")).not.toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByTestId("strokes-for-current-page")).toHaveTextContent("[]")
+    );
   });
 
   it("keeps a note in the list when deleteStrokeNote fails, instead of removing it optimistically", async () => {
@@ -272,7 +280,9 @@ describe("PaperReader", () => {
     fireEvent.click(screen.getByText("simulate-erase-stroke-0"));
 
     await waitFor(() => expect(deleteStrokeNoteMock).toHaveBeenCalledWith({}, "n7"));
-    expect(screen.getByText("(手寫畫記)")).toBeInTheDocument();
+    expect(screen.getByTestId("strokes-for-current-page")).toHaveTextContent(
+      JSON.stringify([{ points: [{ x: 0.2, y: 0.2 }] }])
+    );
   });
 
   it("calls markReachedLastPage when the reader reaches the last page for the first time", async () => {
