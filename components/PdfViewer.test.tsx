@@ -183,6 +183,19 @@ describe("PdfViewer", () => {
     expect(screen.getByTestId("annotation-canvas")).toHaveAttribute("data-interactive", "false");
   });
 
+  it("does not let the annotation canvas's own wrapper div block touches to the page underneath outside pen mode (a plain div defaults to pointer-events: auto, unlike SVG)", () => {
+    render(<PdfViewer fileUrl="/papers/example.pdf" />);
+    const wrapper = screen.getByTestId("annotation-canvas").parentElement as HTMLElement;
+    expect(wrapper.style.pointerEvents).toBe("none");
+  });
+
+  it("lets the annotation canvas's wrapper div capture touches once pen mode is on", () => {
+    render(<PdfViewer fileUrl="/papers/example.pdf" />);
+    fireEvent.click(screen.getByRole("button", { name: /畫筆模式/ }));
+    const wrapper = screen.getByTestId("annotation-canvas").parentElement as HTMLElement;
+    expect(wrapper.style.pointerEvents).toBe("auto");
+  });
+
   it("marks the annotation canvas interactive when pen mode is toggled on, and not interactive when toggled back off", () => {
     render(<PdfViewer fileUrl="/papers/example.pdf" />);
     const toggle = screen.getByRole("button", { name: /畫筆模式/ });

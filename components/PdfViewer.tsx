@@ -175,8 +175,25 @@ export default function PdfViewer({
             // notes stay visible while reading — AnnotationCanvas's own
             // `interactive` prop is what gates pointer capture, so
             // scrolling/zooming isn't blocked outside pen mode.
+            //
+            // pointerEvents must ALSO be set explicitly here, on this
+            // plain <div> wrapper: unlike SVG (which defaults to
+            // `visiblePainted` — no hit-testing without actual paint), a
+            // bare HTML div defaults to `pointer-events: auto` even with
+            // no visible content, so without this it would keep blocking
+            // every touch on the PDF page (including native text
+            // selection) regardless of what AnnotationCanvas's own
+            // internal elements are set to.
           }
-          <div style={{ position: "absolute", top: 0, left: 0, zIndex: 10 }}>
+          <div
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              zIndex: 10,
+              pointerEvents: penMode ? "auto" : "none",
+            }}
+          >
             <AnnotationCanvas
               width={effectivePageWidth}
               height={pageHeight}
