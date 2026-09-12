@@ -255,4 +255,28 @@ describe("AnnotationCanvas", () => {
     );
     expect(matching).toHaveLength(1);
   });
+
+  it("keeps a second stroke visible when it's still pending while only the first stroke's save has round-tripped (writing quickly, one stroke per save)", () => {
+    const { surface, rerenderWith } = setupCanvas();
+
+    // First stroke.
+    fireEvent.pointerDown(surface, { clientX: 80, clientY: 60, pointerType: "pen" });
+    fireEvent.pointerMove(surface, { clientX: 400, clientY: 300, pointerType: "pen" });
+    fireEvent.pointerUp(surface, { clientX: 400, clientY: 300, pointerType: "pen" });
+
+    // Second stroke, drawn immediately after — before the first stroke's
+    // save has resolved and updated the `strokes` prop.
+    fireEvent.pointerDown(surface, { clientX: 100, clientY: 100, pointerType: "pen" });
+    fireEvent.pointerMove(surface, { clientX: 200, clientY: 200, pointerType: "pen" });
+    fireEvent.pointerUp(surface, { clientX: 200, clientY: 200, pointerType: "pen" });
+
+    // Now only the FIRST stroke's save resolves and reaches the strokes
+    // prop — the second one is still in flight.
+    rerenderWith({ strokes: [{ points: [{ x: 0.1, y: 0.1 }, { x: 0.5, y: 0.5 }] }] });
+
+    const visiblePoints = [...document.querySelectorAll("polyline")].map((el) =>
+      el.getAttribute("points")
+    );
+    expect(visiblePoints).toContain("100,100 200,200");
+  });
 });

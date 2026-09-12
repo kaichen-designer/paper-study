@@ -20,6 +20,14 @@ function pointsAttribute(points: Point[]): string {
   return points.map((point) => `${point.x},${point.y}`).join(" ");
 }
 
+// Compares by geometry only (not color/width) — a stroke's points are its
+// real identity here; two genuinely different strokes sharing the exact
+// same point sequence is vanishingly unlikely.
+function strokesEqual(a: Stroke, b: Stroke): boolean {
+  if (a.points.length !== b.points.length) return false;
+  return a.points.every((point, index) => point.x === b.points[index].x && point.y === b.points[index].y);
+}
+
 /**
  * Overlays a drawable surface on a PDF page. Always mounted (so previously
  * saved strokes stay visible even outside pen mode) — `interactive`, not
@@ -41,7 +49,11 @@ function pointsAttribute(points: Point[]): string {
  * it — `onStrokeComplete` triggers an async save in the parent, and without
  * this the stroke would flash empty for however long that round-trip takes
  * (the live-preview polyline clears immediately on pointer-up, but the
- * "real" strokes.map() render doesn't have it yet either).
+ * "real" strokes.map() render doesn't have it yet either). Writing quickly
+ * queues up more than one pending stroke before any single save resolves,
+ * so reconciliation only drops the specific stroke(s) that have actually
+ * appeared in `strokes` — clearing the whole buffer on any props change
+ * would also wipe out sibling strokes still mid-save.
  */
 export default function AnnotationCanvas({
   width,
@@ -69,12 +81,13 @@ export default function AnnotationCanvas({
   const liveStrokeRef = useRef<SVGPolylineElement>(null);
   const [pendingStrokes, setPendingStrokes] = useState<Stroke[]>([]);
 
-  // Once the parent's `strokes` prop changes at all, treat every pending
-  // optimistic stroke as reconciled — either it's the round-trip we were
-  // waiting for, or the page changed and the pending strokes no longer
-  // apply anyway.
+  // Drop only the pending strokes that have actually appeared in the
+  // parent's `strokes` prop — not the whole buffer, since other strokes
+  // drawn in quick succession may still be mid-save.
   useEffect(() => {
-    setPendingStrokes([]);
+    setPendingStrokes((current) =>
+      current.filter((pending) => !strokes.some((saved) => strokesEqual(pending, saved)))
+    );
   }, [strokes]);
 
   function toLocalPoint(event: { clientX: number; clientY: number }): Point {
