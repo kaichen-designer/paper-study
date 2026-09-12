@@ -15,6 +15,7 @@ function setupCanvas(overrides: Partial<Parameters<typeof AnnotationCanvas>[0]> 
       strokeWidth={2}
       tool="pen"
       onEraseStroke={onEraseStroke}
+      interactive={true}
       {...overrides}
     />
   );
@@ -153,5 +154,57 @@ describe("AnnotationCanvas", () => {
     const polyline = document.querySelector("polyline");
     expect(polyline).not.toBeNull();
     expect(polyline?.getAttribute("points")).toBe("80,60 400,300");
+  });
+
+  it("still renders previously saved strokes when not interactive (pen mode off), so notes stay visible", () => {
+    setupCanvas({
+      interactive: false,
+      strokes: [{ points: [{ x: 0.1, y: 0.1 }, { x: 0.5, y: 0.5 }] }],
+    });
+
+    const polyline = document.querySelector("polyline");
+    expect(polyline?.getAttribute("points")).toBe("80,60 400,300");
+  });
+
+  it("does not capture pointer input when not interactive, so scroll/zoom gestures reach the page underneath", () => {
+    const { surface, onStrokeComplete } = setupCanvas({ interactive: false });
+
+    fireEvent.pointerDown(surface, { clientX: 80, clientY: 60 });
+    fireEvent.pointerMove(surface, { clientX: 400, clientY: 300 });
+    fireEvent.pointerUp(surface, { clientX: 400, clientY: 300 });
+
+    expect(onStrokeComplete).not.toHaveBeenCalled();
+  });
+
+  it("does not draw from a touch pointer (finger), so a pinch-zoom gesture isn't mistaken for a stroke", () => {
+    const { surface, onStrokeComplete } = setupCanvas();
+
+    fireEvent.pointerDown(surface, { clientX: 80, clientY: 60, pointerType: "touch" });
+    fireEvent.pointerMove(surface, { clientX: 400, clientY: 300, pointerType: "touch" });
+    fireEvent.pointerUp(surface, { clientX: 400, clientY: 300, pointerType: "touch" });
+
+    expect(onStrokeComplete).not.toHaveBeenCalled();
+  });
+
+  it("still draws from a pen (Apple Pencil) pointer", () => {
+    const { surface, onStrokeComplete } = setupCanvas();
+
+    fireEvent.pointerDown(surface, { clientX: 80, clientY: 60, pointerType: "pen" });
+    fireEvent.pointerMove(surface, { clientX: 400, clientY: 300, pointerType: "pen" });
+    fireEvent.pointerUp(surface, { clientX: 400, clientY: 300, pointerType: "pen" });
+
+    expect(onStrokeComplete).toHaveBeenCalledTimes(1);
+  });
+
+  it("updates the in-progress stroke's DOM element directly while drawing, without waiting for a React re-render", () => {
+    const { surface } = setupCanvas();
+
+    fireEvent.pointerDown(surface, { clientX: 80, clientY: 60, pointerType: "pen" });
+    fireEvent.pointerMove(surface, { clientX: 400, clientY: 300, pointerType: "pen" });
+
+    const livePolyline = document.querySelector(
+      '[data-testid="annotation-live-stroke"]'
+    ) as SVGPolylineElement;
+    expect(livePolyline.getAttribute("points")).toBe("80,60 400,300");
   });
 });

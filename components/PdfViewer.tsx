@@ -159,25 +159,30 @@ export default function PdfViewer({
               onLoadSuccess={handlePageLoadSuccess}
             />
           </Document>
-          {penMode && (
+          {
             // pdf.js's own TextLayer/AnnotationLayer set z-index: 2/3 in
             // their CSS — without an explicit z-index here, this overlay
             // sits below them in stacking order despite coming later in
             // the DOM, so pointer input silently falls through to text
             // selection / native scroll instead of reaching the canvas.
-            <div style={{ position: "absolute", top: 0, left: 0, zIndex: 10 }}>
-              <AnnotationCanvas
-                width={effectivePageWidth}
-                height={pageHeight}
-                strokes={strokes ?? []}
-                onStrokeComplete={(newStrokes) => onStrokeComplete?.(newStrokes)}
-                strokeColor={strokeColor}
-                strokeWidth={strokeWidth}
-                tool={tool}
-                onEraseStroke={(index) => onEraseStroke?.(index)}
-              />
-            </div>
-          )}
+            // Always mounted (not just in pen mode) so previously drawn
+            // notes stay visible while reading — AnnotationCanvas's own
+            // `interactive` prop is what gates pointer capture, so
+            // scrolling/zooming isn't blocked outside pen mode.
+          }
+          <div style={{ position: "absolute", top: 0, left: 0, zIndex: 10 }}>
+            <AnnotationCanvas
+              width={effectivePageWidth}
+              height={pageHeight}
+              strokes={strokes ?? []}
+              onStrokeComplete={(newStrokes) => onStrokeComplete?.(newStrokes)}
+              strokeColor={strokeColor}
+              strokeWidth={strokeWidth}
+              tool={tool}
+              onEraseStroke={(index) => onEraseStroke?.(index)}
+              interactive={penMode}
+            />
+          </div>
         </div>
       </div>
       {penMode && (

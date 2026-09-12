@@ -45,17 +45,20 @@ vi.mock("./AnnotationCanvas", () => ({
     strokeColor,
     strokeWidth,
     onEraseStroke,
+    interactive,
   }: {
     tool?: string;
     strokeColor?: string;
     strokeWidth?: number;
     onEraseStroke?: (index: number) => void;
+    interactive?: boolean;
   }) => (
     <div
       data-testid="annotation-canvas"
       data-tool={tool}
       data-stroke-color={strokeColor}
       data-stroke-width={strokeWidth}
+      data-interactive={interactive}
     >
       <button type="button" onClick={() => onEraseStroke?.(0)}>
         simulate-erase-stroke-0
@@ -167,20 +170,21 @@ describe("PdfViewer", () => {
     expect(typeof doc.getPage).toBe("function");
   });
 
-  it("does not render the annotation canvas until pen mode is toggled on", () => {
+  it("keeps the annotation canvas mounted even before pen mode is toggled on, so saved notes stay visible while reading", () => {
     render(<PdfViewer fileUrl="/papers/example.pdf" />);
-    expect(screen.queryByTestId("annotation-canvas")).not.toBeInTheDocument();
+    expect(screen.getByTestId("annotation-canvas")).toBeInTheDocument();
+    expect(screen.getByTestId("annotation-canvas")).toHaveAttribute("data-interactive", "false");
   });
 
-  it("mounts the annotation canvas when pen mode is toggled on, and unmounts it when toggled back off", () => {
+  it("marks the annotation canvas interactive when pen mode is toggled on, and not interactive when toggled back off", () => {
     render(<PdfViewer fileUrl="/papers/example.pdf" />);
     const toggle = screen.getByRole("button", { name: /畫筆模式/ });
 
     fireEvent.click(toggle);
-    expect(screen.getByTestId("annotation-canvas")).toBeInTheDocument();
+    expect(screen.getByTestId("annotation-canvas")).toHaveAttribute("data-interactive", "true");
 
     fireEvent.click(toggle);
-    expect(screen.queryByTestId("annotation-canvas")).not.toBeInTheDocument();
+    expect(screen.getByTestId("annotation-canvas")).toHaveAttribute("data-interactive", "false");
   });
 
   it("visibly indicates when pen mode is active, so the drawable area is discoverable", () => {

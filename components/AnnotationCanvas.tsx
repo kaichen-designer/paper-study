@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef } from "react";
 import { denormalizePoint, normalizePoint, type Point } from "@/lib/annotations/stroke-geometry";
 import type { Stroke } from "@/lib/annotations/queries";
 import { doesEraserPathIntersectStroke } from "@/lib/annotations/stroke-hit-test";
@@ -16,11 +16,25 @@ const DEFAULT_STROKE_WIDTH = 2;
 // eraser some forgiveness beyond the exact line geometry.
 const ERASER_RADIUS_PX = 10;
 
+function pointsAttribute(points: Point[]): string {
+  return points.map((point) => `${point.x},${point.y}`).join(" ");
+}
+
 /**
- * Overlays a drawable surface on a PDF page. Always captures pointer input
- * while mounted — components/PdfViewer.tsx controls whether this is
- * mounted at all (pen mode toggle), rather than this component tracking
- * its own enabled/disabled state.
+ * Overlays a drawable surface on a PDF page. Always mounted (so previously
+ * saved strokes stay visible even outside pen mode) — `interactive`, not
+ * mounting, controls whether it captures pointer input at all, so it never
+ * blocks scrolling/zooming the underlying page while pen mode is off.
+ *
+ * Only `pointerType === "pen"` (Apple Pencil) draws. Finger (`"touch"`)
+ * input is deliberately ignored rather than prevented, so a two-finger
+ * pinch-zoom reaches the browser's native gesture handling instead of
+ * being captured as a scribbled stroke.
+ *
+ * The in-progress stroke is rendered by mutating a polyline DOM node
+ * directly (via ref) instead of through React state — going through
+ * setState + re-render on every pointermove added enough latency to make
+ * fast handwriting visibly lag behind the physical pen.
  */
 export default function AnnotationCanvas({
   width,
@@ -31,6 +45,7 @@ export default function AnnotationCanvas({
   strokeWidth,
   tool,
   onEraseStroke,
+  interactive,
 }: {
   width: number;
   height: number;
@@ -40,9 +55,11 @@ export default function AnnotationCanvas({
   strokeWidth: number;
   tool: "pen" | "eraser";
   onEraseStroke: (index: number) => void;
+  interactive: boolean;
 }) {
-  const [drawingPoints, setDrawingPoints] = useState<Point[]>([]);
+  const drawingPointsRef = useRef<Point[]>([]);
   const surfaceRef = useRef<SVGSVGElement>(null);
+  const liveStrokeRef = useRef<SVGPolylineElement>(null);
 
   function toLocalPoint(event: { clientX: number; clientY: number }): Point {
     const rect = surfaceRef.current!.getBoundingClientRect();
@@ -50,16 +67,21 @@ export default function AnnotationCanvas({
   }
 
   function handlePointerDown(event: React.PointerEvent) {
-    // Belt-and-suspenders alongside the `touch-action: none` CSS: some
-    // WebKit versions still let a nested scrollable ancestor (the
+    if (!interactive || event.pointerType === "touch") return;
+
+    // Belt-and-suspenders alongside the `touch-action` CSS: some WebKit
+    // versions still let a nested scrollable ancestor (the
     // .pdf-viewer-page container has overflow: auto) hijack the gesture
     // as a scroll/pan unless the pointerdown itself is also prevented.
     event.preventDefault();
-    setDrawingPoints([toLocalPoint(event)]);
+    const point = toLocalPoint(event);
+    drawingPointsRef.current = [point];
+    liveStrokeRef.current?.setAttribute("points", pointsAttribute(drawingPointsRef.current));
   }
 
   function handlePointerMove(event: React.PointerEvent) {
-    if (drawingPoints.length === 0) return;
+    if (!interactive || event.pointerType === "touch") return;
+    if (drawingPointsRef.current.length === 0) return;
     event.preventDefault();
     const localPoint = toLocalPoint(event);
 
@@ -73,19 +95,28 @@ export default function AnnotationCanvas({
           onEraseStroke(index);
         }
       });
-      setDrawingPoints((points) => [...points, localPoint]);
+      drawingPointsRef.current = [...drawingPointsRef.current, localPoint];
       return;
     }
 
-    setDrawingPoints((points) => [...points, localPoint]);
+    drawingPointsRef.current = [...drawingPointsRef.current, localPoint];
+    liveStrokeRef.current?.setAttribute("points", pointsAttribute(drawingPointsRef.current));
   }
 
-  function handlePointerUp() {
-    if (tool === "pen" && drawingPoints.length > 1) {
-      const normalized = drawingPoints.map((point) => normalizePoint(point, width, height));
+  function finishDrawing() {
+    if (tool === "pen" && drawingPointsRef.current.length > 1) {
+      const normalized = drawingPointsRef.current.map((point) =>
+        normalizePoint(point, width, height)
+      );
       onStrokeComplete([{ points: normalized, color: strokeColor, width: strokeWidth }]);
     }
-    setDrawingPoints([]);
+    drawingPointsRef.current = [];
+    liveStrokeRef.current?.setAttribute("points", "");
+  }
+
+  function handlePointerUp(event: React.PointerEvent) {
+    if (event.pointerType === "touch") return;
+    finishDrawing();
   }
 
   function toPolylinePoints(stroke: Stroke): string {
@@ -106,8 +137,11 @@ export default function AnnotationCanvas({
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
-      onPointerCancel={() => setDrawingPoints([])}
-      style={{ touchAction: "none", pointerEvents: "auto" }}
+      onPointerCancel={finishDrawing}
+      style={{
+        touchAction: interactive ? "pinch-zoom" : "auto",
+        pointerEvents: interactive ? "auto" : "none",
+      }}
     >
       {/*
         SVG's default `pointer-events: visiblePainted` hit-tests based on
@@ -117,7 +151,8 @@ export default function AnnotationCanvas({
         pointer events at all. `pointerEvents: "all"` here makes hit
         detection unconditional (geometry only, ignores paint/opacity),
         guaranteeing the whole surface is touchable even before any
-        stroke exists.
+        stroke exists. Only takes effect while `interactive` (the parent
+        svg falls back to `pointerEvents: "none"` otherwise).
       */}
       <rect
         data-testid="annotation-hit-area"
@@ -139,16 +174,16 @@ export default function AnnotationCanvas({
           strokeLinejoin="round"
         />
       ))}
-      {tool === "pen" && drawingPoints.length > 1 && (
-        <polyline
-          points={drawingPoints.map((point) => `${point.x},${point.y}`).join(" ")}
-          fill="none"
-          stroke={strokeColor}
-          strokeWidth={strokeWidth}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      )}
+      <polyline
+        ref={liveStrokeRef}
+        data-testid="annotation-live-stroke"
+        points=""
+        fill="none"
+        stroke={strokeColor}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
