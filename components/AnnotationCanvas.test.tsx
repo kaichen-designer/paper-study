@@ -72,14 +72,26 @@ describe("AnnotationCanvas", () => {
     expect(hitArea?.getAttribute("height")).toBe("600");
   });
 
-  it("forces pointer-events on the hit-area explicitly, rather than relying on default SVG hit-testing of an invisible fill", () => {
-    setupCanvas({ strokes: [] });
+  it("forces pointer-events on the hit-area explicitly while interactive, rather than relying on default SVG hit-testing of an invisible fill", () => {
+    setupCanvas({ strokes: [], interactive: true });
 
     const hitArea = document.querySelector('rect[data-testid="annotation-hit-area"]') as SVGRectElement;
     // SVG's default `visiblePainted` hit-testing is ambiguous for
     // zero-alpha fills across browsers — pointerEvents: "all" makes hit
     // detection unconditional, regardless of paint/opacity.
     expect(hitArea.style.pointerEvents).toBe("all");
+  });
+
+  it("does not force pointer-events on the hit-area while not interactive, so it can't shadow-block taps meant for the page underneath (e.g. native text selection)", () => {
+    setupCanvas({ strokes: [], interactive: false });
+
+    const hitArea = document.querySelector('rect[data-testid="annotation-hit-area"]') as SVGRectElement;
+    // A child element's explicit pointer-events value overrides an
+    // ancestor's `pointer-events: none` for hit-testing — so leaving this
+    // hardcoded to "all" would make the whole page area untouchable
+    // (blocking scroll, zoom, and text selection) even outside pen mode,
+    // regardless of the parent <svg>'s own pointer-events.
+    expect(hitArea.style.pointerEvents).not.toBe("all");
   });
 
   it("applies the currently selected strokeColor/strokeWidth to a newly drawn stroke", () => {

@@ -169,8 +169,14 @@ export default function AnnotationCanvas({
         pointer events at all. `pointerEvents: "all"` here makes hit
         detection unconditional (geometry only, ignores paint/opacity),
         guaranteeing the whole surface is touchable even before any
-        stroke exists. Only takes effect while `interactive` (the parent
-        svg falls back to `pointerEvents: "none"` otherwise).
+        stroke exists.
+
+        This MUST stay conditional on `interactive`, matching the parent
+        <svg> — an explicit pointer-events value on a child overrides an
+        ancestor's `pointer-events: none` for hit-testing, so a hardcoded
+        "all" here would make this invisible rect swallow every touch over
+        the whole page (blocking scroll/zoom/native text selection) even
+        while not interactive, regardless of what the parent svg sets.
       */}
       <rect
         data-testid="annotation-hit-area"
@@ -179,7 +185,7 @@ export default function AnnotationCanvas({
         width={width}
         height={height}
         fill="transparent"
-        style={{ pointerEvents: "all" }}
+        style={{ pointerEvents: interactive ? "all" : "none" }}
       />
       {strokes.map((stroke, index) => (
         <polyline
