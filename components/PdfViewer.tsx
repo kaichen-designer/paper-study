@@ -5,6 +5,7 @@ import { Document, Page, pdfjs } from "react-pdf";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
 import { canGoNext, canGoPrevious, clampPage, nextPage, previousPage } from "@/lib/pdf/pagination";
+import { getSelectionText } from "@/lib/pdf/selection-text";
 import AnnotationCanvas from "./AnnotationCanvas";
 import AnnotationToolbar, { PALETTE, WIDTHS } from "./AnnotationToolbar";
 import type { Stroke } from "@/lib/annotations/queries";
@@ -108,7 +109,12 @@ export default function PdfViewer({
       const anchorNode = selection.anchorNode;
       if (!anchorNode || !containerRef.current?.contains(anchorNode)) return;
 
-      const text = selection.toString();
+      // Not `selection.toString()`: pdf.js renders each text run as its own
+      // absolutely-positioned span with no guaranteed whitespace between
+      // runs, so the raw browser selection string can fuse words together
+      // at line breaks/run boundaries — see lib/pdf/selection-text.ts.
+      const range = selection.getRangeAt(0);
+      const text = getSelectionText(range, containerRef.current);
       if (text) {
         onTextSelected!(text);
       }

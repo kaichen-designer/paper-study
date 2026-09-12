@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
+// Text extraction from a Range is covered in isolation by
+// lib/pdf/selection-text.test.ts — here we only need to verify PdfViewer
+// wires selectionchange -> getSelectionText -> onTextSelected correctly.
+vi.mock("@/lib/pdf/selection-text", () => ({
+  getSelectionText: () => "selected excerpt",
+}));
+
 vi.mock("react-pdf", () => ({
   pdfjs: { GlobalWorkerOptions: {}, version: "test" },
   Document: ({
@@ -149,9 +156,9 @@ describe("PdfViewer", () => {
     render(<PdfViewer fileUrl="/papers/example.pdf" onTextSelected={onTextSelected} />);
 
     const getSelectionSpy = vi.spyOn(window, "getSelection").mockReturnValue({
-      toString: () => "selected excerpt",
       anchorNode: screen.getByTestId("document"),
       isCollapsed: false,
+      getRangeAt: () => ({}) as Range,
     } as unknown as Selection);
 
     fireEvent(document, new Event("selectionchange"));
@@ -259,9 +266,9 @@ describe("PdfViewer", () => {
     fireEvent.click(screen.getByRole("button", { name: /畫筆模式/ }));
 
     const getSelectionSpy = vi.spyOn(window, "getSelection").mockReturnValue({
-      toString: () => "selected excerpt",
       anchorNode: screen.getByTestId("document"),
       isCollapsed: false,
+      getRangeAt: () => ({}) as Range,
     } as unknown as Selection);
 
     fireEvent(document, new Event("selectionchange"));
