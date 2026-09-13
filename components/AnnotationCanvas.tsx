@@ -1,7 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { denormalizePoint, normalizePoint, type Point } from "@/lib/annotations/stroke-geometry";
+import {
+  denormalizePoint,
+  normalizePoint,
+  smoothPathFromPoints,
+  type Point,
+} from "@/lib/annotations/stroke-geometry";
 import type { Stroke } from "@/lib/annotations/queries";
 import { doesEraserPathIntersectStroke } from "@/lib/annotations/stroke-hit-test";
 
@@ -21,8 +26,14 @@ const HIGHLIGHTER_OPACITY = 0.35;
 // eraser some forgiveness beyond the exact line geometry.
 const ERASER_RADIUS_PX = 10;
 
-function pointsAttribute(points: Point[]): string {
-  return points.map((point) => `${point.x},${point.y}`).join(" ");
+// A stroke needs at least two DIFFERING points — otherwise it's a
+// stationary tap, not a drawn mark. Point *count* alone isn't enough: once
+// pointerup also records its own position (see handlePointerUp), a truly
+// motionless tap ends up with two identical points, not one.
+function hasMeaningfulMovement(points: Point[]): boolean {
+  if (points.length < 2) return false;
+  const [first] = points;
+  return points.some((point) => point.x !== first.x || point.y !== first.y);
 }
 
 // Compares by geometry only (not color/width) — a stroke's points are its
@@ -83,7 +94,7 @@ export default function AnnotationCanvas({
 }) {
   const drawingPointsRef = useRef<Point[]>([]);
   const surfaceRef = useRef<SVGSVGElement>(null);
-  const liveStrokeRef = useRef<SVGPolylineElement>(null);
+  const liveStrokeRef = useRef<SVGPathElement>(null);
   const eraserCursorRef = useRef<SVGCircleElement>(null);
   const [pendingStrokes, setPendingStrokes] = useState<Stroke[]>([]);
 
@@ -113,6 +124,32 @@ export default function AnnotationCanvas({
     eraserCursorRef.current?.setAttribute("opacity", "0");
   }
 
+  // Shared by pointermove and pointerup — a fast enough down-then-up with
+  // NO intermediate pointermove events (a short tap-like mark, common when
+  // writing quickly) used to be silently dropped, because only
+  // pointermove ever appended to drawingPointsRef; pointerup never
+  // recorded its own position. Routing pointerup through this too means
+  // even a zero-move stroke still ends up with a real (down, up) pair.
+  function recordPoint(localPoint: Point) {
+    if (tool === "eraser") {
+      showEraserCursor(localPoint);
+      strokes.forEach((stroke, index) => {
+        const pixelStroke: Stroke = {
+          points: stroke.points.map((point) => denormalizePoint(point, width, height)),
+          width: stroke.width,
+        };
+        if (doesEraserPathIntersectStroke([localPoint], pixelStroke, ERASER_RADIUS_PX)) {
+          onEraseStroke(index);
+        }
+      });
+      drawingPointsRef.current = [...drawingPointsRef.current, localPoint];
+      return;
+    }
+
+    drawingPointsRef.current = [...drawingPointsRef.current, localPoint];
+    liveStrokeRef.current?.setAttribute("d", smoothPathFromPoints(drawingPointsRef.current));
+  }
+
   function handlePointerDown(event: React.PointerEvent) {
     if (!interactive || event.pointerType === "touch") return;
 
@@ -140,7 +177,7 @@ export default function AnnotationCanvas({
     if (tool === "eraser") {
       showEraserCursor(point);
     } else {
-      liveStrokeRef.current?.setAttribute("points", pointsAttribute(drawingPointsRef.current));
+      liveStrokeRef.current?.setAttribute("d", smoothPathFromPoints(drawingPointsRef.current));
     }
   }
 
@@ -148,29 +185,11 @@ export default function AnnotationCanvas({
     if (!interactive || event.pointerType === "touch") return;
     if (drawingPointsRef.current.length === 0) return;
     event.preventDefault();
-    const localPoint = toLocalPoint(event);
-
-    if (tool === "eraser") {
-      showEraserCursor(localPoint);
-      strokes.forEach((stroke, index) => {
-        const pixelStroke: Stroke = {
-          points: stroke.points.map((point) => denormalizePoint(point, width, height)),
-          width: stroke.width,
-        };
-        if (doesEraserPathIntersectStroke([localPoint], pixelStroke, ERASER_RADIUS_PX)) {
-          onEraseStroke(index);
-        }
-      });
-      drawingPointsRef.current = [...drawingPointsRef.current, localPoint];
-      return;
-    }
-
-    drawingPointsRef.current = [...drawingPointsRef.current, localPoint];
-    liveStrokeRef.current?.setAttribute("points", pointsAttribute(drawingPointsRef.current));
+    recordPoint(toLocalPoint(event));
   }
 
   function finishDrawing() {
-    if ((tool === "pen" || tool === "highlighter") && drawingPointsRef.current.length > 1) {
+    if ((tool === "pen" || tool === "highlighter") && hasMeaningfulMovement(drawingPointsRef.current)) {
       const normalized = drawingPointsRef.current.map((point) =>
         normalizePoint(point, width, height)
       );
@@ -184,22 +203,25 @@ export default function AnnotationCanvas({
       onStrokeComplete([stroke]);
     }
     drawingPointsRef.current = [];
-    liveStrokeRef.current?.setAttribute("points", "");
+    liveStrokeRef.current?.setAttribute("d", "");
     hideEraserCursor();
   }
 
   function handlePointerUp(event: React.PointerEvent) {
     if (event.pointerType === "touch") return;
+    // Only pointerdown fired for this stroke, with zero pointermoves in
+    // between (a very fast, short mark) — record the release position too,
+    // so it isn't discarded outright for having just a single point.
+    // When pointermove already ran, its last position is where the finger/
+    // pencil actually was, so there's nothing new to add here.
+    if (drawingPointsRef.current.length === 1) {
+      recordPoint(toLocalPoint(event));
+    }
     finishDrawing();
   }
 
-  function toPolylinePoints(stroke: Stroke): string {
-    return stroke.points
-      .map((point) => {
-        const pixel = denormalizePoint(point, width, height);
-        return `${pixel.x},${pixel.y}`;
-      })
-      .join(" ");
+  function toSmoothPath(stroke: Stroke): string {
+    return smoothPathFromPoints(stroke.points.map((point) => denormalizePoint(point, width, height)));
   }
 
   return (
@@ -244,9 +266,9 @@ export default function AnnotationCanvas({
         style={{ pointerEvents: interactive ? "all" : "none" }}
       />
       {strokes.map((stroke, index) => (
-        <polyline
+        <path
           key={`saved-${index}`}
-          points={toPolylinePoints(stroke)}
+          d={toSmoothPath(stroke)}
           fill="none"
           stroke={stroke.color ?? DEFAULT_STROKE_COLOR}
           strokeWidth={stroke.width ?? DEFAULT_STROKE_WIDTH}
@@ -256,9 +278,9 @@ export default function AnnotationCanvas({
         />
       ))}
       {pendingStrokes.map((stroke, index) => (
-        <polyline
+        <path
           key={`pending-${index}`}
-          points={toPolylinePoints(stroke)}
+          d={toSmoothPath(stroke)}
           fill="none"
           stroke={stroke.color ?? DEFAULT_STROKE_COLOR}
           strokeWidth={stroke.width ?? DEFAULT_STROKE_WIDTH}
@@ -267,10 +289,10 @@ export default function AnnotationCanvas({
           strokeLinejoin="round"
         />
       ))}
-      <polyline
+      <path
         ref={liveStrokeRef}
         data-testid="annotation-live-stroke"
-        points=""
+        d=""
         fill="none"
         stroke={strokeColor}
         strokeWidth={strokeWidth}

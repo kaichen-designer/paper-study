@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { denormalizePoint, normalizePoint } from "./stroke-geometry";
+import { denormalizePoint, normalizePoint, smoothPathFromPoints } from "./stroke-geometry";
 
 describe("normalizePoint / denormalizePoint", () => {
   it.each([
@@ -37,5 +37,34 @@ describe("normalizePoint / denormalizePoint", () => {
 
     expect(restored.x).toBeCloseTo(original.x);
     expect(restored.y).toBeCloseTo(original.y);
+  });
+});
+
+describe("smoothPathFromPoints", () => {
+  it("returns an empty string for no points", () => {
+    expect(smoothPathFromPoints([])).toBe("");
+  });
+
+  it("moves to the single point without drawing anything, for a single-point stroke", () => {
+    expect(smoothPathFromPoints([{ x: 5, y: 10 }])).toBe("M 5 10");
+  });
+
+  it("draws a straight line for exactly two points", () => {
+    expect(smoothPathFromPoints([{ x: 0, y: 0 }, { x: 10, y: 20 }])).toBe("M 0 0 L 10 20");
+  });
+
+  it("draws quadratic curves through the midpoints of each segment, ending exactly at the last point", () => {
+    const points = [
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
+      { x: 20, y: 10 },
+      { x: 30, y: 10 },
+    ];
+    // Each interior point is a curve control point, curving toward the
+    // midpoint of it and the next point — this is what keeps the line from
+    // having a sharp angle exactly at each raw sampled point.
+    expect(smoothPathFromPoints(points)).toBe(
+      "M 0 0 Q 10 0 15 5 Q 20 10 25 10 L 30 10"
+    );
   });
 });

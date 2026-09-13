@@ -63,6 +63,21 @@ describe("AnnotationCanvas", () => {
     expect(onStrokeComplete).not.toHaveBeenCalled();
   });
 
+  it("still saves a short, fast mark even when the browser reports zero pointermove events between down and up", () => {
+    const { surface, onStrokeComplete } = setupCanvas();
+
+    // No pointermove at all — simulates writing quickly enough that the
+    // whole down-to-up motion happens with no intermediate move events,
+    // which used to make the stroke get discarded outright even though
+    // the pointer genuinely moved.
+    fireEvent.pointerDown(surface, { clientX: 80, clientY: 60, pointerType: "pen" });
+    fireEvent.pointerUp(surface, { clientX: 85, clientY: 63, pointerType: "pen" });
+
+    expect(onStrokeComplete).toHaveBeenCalledTimes(1);
+    const [strokes] = onStrokeComplete.mock.calls[0];
+    expect(strokes[0].points).toHaveLength(2);
+  });
+
   it("renders a full-size hit-area so touches register even when the canvas is completely empty (no strokes yet)", () => {
     setupCanvas({ strokes: [] });
 
@@ -111,7 +126,7 @@ describe("AnnotationCanvas", () => {
       strokes: [{ points: [{ x: 0.1, y: 0.1 }, { x: 0.5, y: 0.5 }] }],
     });
 
-    const polyline = document.querySelector("polyline") as SVGPolylineElement;
+    const polyline = document.querySelector("path") as SVGPathElement;
     expect(polyline.getAttribute("stroke")).toBe("#e63946");
     expect(polyline.getAttribute("stroke-width")).toBe("2");
   });
@@ -123,7 +138,7 @@ describe("AnnotationCanvas", () => {
       ],
     });
 
-    const polyline = document.querySelector("polyline") as SVGPolylineElement;
+    const polyline = document.querySelector("path") as SVGPathElement;
     expect(polyline.getAttribute("stroke")).toBe("#1d4ed8");
     expect(polyline.getAttribute("stroke-width")).toBe("8");
   });
@@ -168,9 +183,9 @@ describe("AnnotationCanvas", () => {
       strokes: [{ points: [{ x: 0.1, y: 0.1 }, { x: 0.5, y: 0.5 }] }],
     });
 
-    const polyline = document.querySelector("polyline");
-    expect(polyline).not.toBeNull();
-    expect(polyline?.getAttribute("points")).toBe("80,60 400,300");
+    const path = document.querySelector("path");
+    expect(path).not.toBeNull();
+    expect(path?.getAttribute("d")).toBe("M 80 60 L 400 300");
   });
 
   it("still renders previously saved strokes when not interactive (pen mode off), so notes stay visible", () => {
@@ -179,8 +194,8 @@ describe("AnnotationCanvas", () => {
       strokes: [{ points: [{ x: 0.1, y: 0.1 }, { x: 0.5, y: 0.5 }] }],
     });
 
-    const polyline = document.querySelector("polyline");
-    expect(polyline?.getAttribute("points")).toBe("80,60 400,300");
+    const path = document.querySelector("path");
+    expect(path?.getAttribute("d")).toBe("M 80 60 L 400 300");
   });
 
   it("does not capture pointer input when not interactive, so scroll/zoom gestures reach the page underneath", () => {
@@ -240,10 +255,10 @@ describe("AnnotationCanvas", () => {
     fireEvent.pointerDown(surface, { clientX: 80, clientY: 60, pointerType: "pen" });
     fireEvent.pointerMove(surface, { clientX: 400, clientY: 300, pointerType: "pen" });
 
-    const livePolyline = document.querySelector(
+    const livePath = document.querySelector(
       '[data-testid="annotation-live-stroke"]'
-    ) as SVGPolylineElement;
-    expect(livePolyline.getAttribute("points")).toBe("80,60 400,300");
+    ) as SVGPathElement;
+    expect(livePath.getAttribute("d")).toBe("M 80 60 L 400 300");
   });
 
   it("keeps the just-finished stroke visible immediately on pointer-up, before the parent's strokes prop has caught up (no disappear/reappear flicker while the save round-trips)", () => {
@@ -256,10 +271,8 @@ describe("AnnotationCanvas", () => {
     // `strokes` prop is still [] at this point (the parent hasn't
     // persisted/echoed it back yet) — the finished stroke must still be
     // painted somewhere.
-    const visiblePoints = [...document.querySelectorAll("polyline")].map((el) =>
-      el.getAttribute("points")
-    );
-    expect(visiblePoints).toContain("80,60 400,300");
+    const visiblePaths = [...document.querySelectorAll("path")].map((el) => el.getAttribute("d"));
+    expect(visiblePaths).toContain("M 80 60 L 400 300");
   });
 
   it("drops the optimistic copy once the parent's strokes prop actually includes the saved stroke, instead of rendering it twice", () => {
@@ -271,8 +284,8 @@ describe("AnnotationCanvas", () => {
 
     rerenderWith({ strokes: [{ points: [{ x: 0.1, y: 0.1 }, { x: 0.5, y: 0.5 }] }] });
 
-    const matching = [...document.querySelectorAll("polyline")].filter(
-      (el) => el.getAttribute("points") === "80,60 400,300"
+    const matching = [...document.querySelectorAll("path")].filter(
+      (el) => el.getAttribute("d") === "M 80 60 L 400 300"
     );
     expect(matching).toHaveLength(1);
   });
@@ -295,10 +308,8 @@ describe("AnnotationCanvas", () => {
     // prop — the second one is still in flight.
     rerenderWith({ strokes: [{ points: [{ x: 0.1, y: 0.1 }, { x: 0.5, y: 0.5 }] }] });
 
-    const visiblePoints = [...document.querySelectorAll("polyline")].map((el) =>
-      el.getAttribute("points")
-    );
-    expect(visiblePoints).toContain("100,100 200,200");
+    const visiblePaths = [...document.querySelectorAll("path")].map((el) => el.getAttribute("d"));
+    expect(visiblePaths).toContain("M 100 100 L 200 200");
   });
 
   it("with the highlighter tool, drawing saves a translucent stroke", () => {
@@ -385,7 +396,7 @@ describe("AnnotationCanvas", () => {
       strokes: [{ points: [{ x: 0.1, y: 0.1 }, { x: 0.5, y: 0.5 }], opacity: 0.35 }],
     });
 
-    const polyline = document.querySelector("polyline") as SVGPolylineElement;
+    const polyline = document.querySelector("path") as SVGPathElement;
     expect(polyline.getAttribute("stroke-opacity")).toBe("0.35");
   });
 
@@ -394,7 +405,7 @@ describe("AnnotationCanvas", () => {
       strokes: [{ points: [{ x: 0.1, y: 0.1 }, { x: 0.5, y: 0.5 }] }],
     });
 
-    const polyline = document.querySelector("polyline") as SVGPolylineElement;
+    const polyline = document.querySelector("path") as SVGPathElement;
     expect(polyline.getAttribute("stroke-opacity")).toBe("1");
   });
 });
