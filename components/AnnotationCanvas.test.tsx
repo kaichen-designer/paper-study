@@ -213,6 +213,27 @@ describe("AnnotationCanvas", () => {
     expect(onStrokeComplete).toHaveBeenCalledTimes(1);
   });
 
+  it("captures the pointer on pointer-down, so a fast next stroke can't lose events to a hit-test target change mid-gesture", () => {
+    const { surface } = setupCanvas();
+    const setPointerCapture = vi.fn();
+    // jsdom doesn't implement pointer capture — attach a spy directly since
+    // there's nothing to vi.spyOn an existing method on.
+    (surface as unknown as { setPointerCapture: typeof setPointerCapture }).setPointerCapture =
+      setPointerCapture;
+
+    fireEvent.pointerDown(surface, { clientX: 80, clientY: 60, pointerType: "pen", pointerId: 7 });
+
+    expect(setPointerCapture).toHaveBeenCalledWith(7);
+  });
+
+  it("does not throw when the environment has no setPointerCapture to call", () => {
+    const { surface } = setupCanvas();
+
+    expect(() =>
+      fireEvent.pointerDown(surface, { clientX: 80, clientY: 60, pointerType: "pen" })
+    ).not.toThrow();
+  });
+
   it("updates the in-progress stroke's DOM element directly while drawing, without waiting for a React re-render", () => {
     const { surface } = setupCanvas();
 

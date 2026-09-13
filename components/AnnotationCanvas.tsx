@@ -108,6 +108,20 @@ export default function AnnotationCanvas({
     // .pdf-viewer-page container has overflow: auto) hijack the gesture
     // as a scroll/pan unless the pointerdown itself is also prevented.
     event.preventDefault();
+
+    // Explicitly capture this pointer so every subsequent move/up for THIS
+    // stroke keeps targeting the canvas regardless of what else re-renders
+    // mid-gesture (e.g. the previous stroke's pendingStrokes update) —
+    // without this, writing quickly enough that the next stroke starts
+    // while a re-render from the last one is still in flight could lose
+    // the new stroke's opening events entirely.
+    try {
+      (event.target as Element).setPointerCapture?.(event.pointerId);
+    } catch {
+      // Safe to ignore — capture is a reliability improvement, not a
+      // requirement; drawing still works without it.
+    }
+
     const point = toLocalPoint(event);
     drawingPointsRef.current = [point];
     liveStrokeRef.current?.setAttribute("points", pointsAttribute(drawingPointsRef.current));
