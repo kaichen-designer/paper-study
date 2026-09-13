@@ -337,6 +337,49 @@ describe("AnnotationCanvas", () => {
     expect(onEraseStroke).not.toHaveBeenCalled();
   });
 
+  it("shows an eraser-radius cursor while erasing, so it's clear how large an area will be erased", () => {
+    const { surface } = setupCanvas({ tool: "eraser", strokeWidth: 4 });
+
+    fireEvent.pointerDown(surface, { clientX: 80, clientY: 60, pointerType: "pen" });
+
+    const cursor = document.querySelector('[data-testid="eraser-cursor"]') as SVGCircleElement;
+    expect(cursor.getAttribute("cx")).toBe("80");
+    expect(cursor.getAttribute("cy")).toBe("60");
+    // ERASER_RADIUS_PX (10) + half the current stroke width (4/2 = 2).
+    expect(cursor.getAttribute("r")).toBe("12");
+    expect(cursor.getAttribute("opacity")).not.toBe("0");
+  });
+
+  it("moves the eraser cursor as the eraser drags", () => {
+    const { surface } = setupCanvas({ tool: "eraser" });
+
+    fireEvent.pointerDown(surface, { clientX: 80, clientY: 60, pointerType: "pen" });
+    fireEvent.pointerMove(surface, { clientX: 200, clientY: 150, pointerType: "pen" });
+
+    const cursor = document.querySelector('[data-testid="eraser-cursor"]') as SVGCircleElement;
+    expect(cursor.getAttribute("cx")).toBe("200");
+    expect(cursor.getAttribute("cy")).toBe("150");
+  });
+
+  it("hides the eraser cursor once erasing stops", () => {
+    const { surface } = setupCanvas({ tool: "eraser" });
+
+    fireEvent.pointerDown(surface, { clientX: 80, clientY: 60, pointerType: "pen" });
+    fireEvent.pointerUp(surface, { clientX: 80, clientY: 60, pointerType: "pen" });
+
+    const cursor = document.querySelector('[data-testid="eraser-cursor"]') as SVGCircleElement;
+    expect(cursor.getAttribute("opacity")).toBe("0");
+  });
+
+  it("does not show the eraser cursor while drawing with the pen tool", () => {
+    const { surface } = setupCanvas({ tool: "pen" });
+
+    fireEvent.pointerDown(surface, { clientX: 80, clientY: 60, pointerType: "pen" });
+
+    const cursor = document.querySelector('[data-testid="eraser-cursor"]') as SVGCircleElement;
+    expect(cursor.getAttribute("opacity")).toBe("0");
+  });
+
   it("renders a saved highlighter stroke with reduced stroke-opacity", () => {
     setupCanvas({
       strokes: [{ points: [{ x: 0.1, y: 0.1 }, { x: 0.5, y: 0.5 }], opacity: 0.35 }],

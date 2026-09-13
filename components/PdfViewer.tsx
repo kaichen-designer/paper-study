@@ -46,6 +46,7 @@ export default function PdfViewer({
   const [tool, setTool] = useState<"pen" | "highlighter" | "eraser">("pen");
   const [strokeColor, setStrokeColor] = useState(PALETTE[0]);
   const [strokeWidth, setStrokeWidth] = useState(DEFAULT_WIDTH);
+  const [hasActiveSelection, setHasActiveSelection] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const pageWrapperRef = useRef<HTMLDivElement>(null);
 
@@ -103,26 +104,36 @@ export default function PdfViewer({
 
     function handleSelectionChange() {
       const selection = window.getSelection();
-      if (!selection || selection.isCollapsed) return;
+      const anchorNode = selection?.anchorNode;
+      const withinViewer = !!anchorNode && !!containerRef.current?.contains(anchorNode);
 
-      // Only report selections made inside this viewer's rendered PDF text
-      // layer, not selections elsewhere on the page.
-      const anchorNode = selection.anchorNode;
-      if (!anchorNode || !containerRef.current?.contains(anchorNode)) return;
+      // Experimental: iOS Safari's drag-to-extend selection handles compete
+      // with .pdf-viewer-page's own overflow:auto scrolling for the same
+      // drag gesture, so extending a selection can get misread as a page
+      // scroll instead. Suspending scroll while a real selection is active
+      // removes that competition — at the cost of not being able to scroll
+      // until the selection is cleared.
+      setHasActiveSelection(!!selection && !selection.isCollapsed && withinViewer);
+
+      if (!selection || selection.isCollapsed) return;
+      if (!withinViewer) return;
 
       // Not `selection.toString()`: pdf.js renders each text run as its own
       // absolutely-positioned span with no guaranteed whitespace between
       // runs, so the raw browser selection string can fuse words together
       // at line breaks/run boundaries — see lib/pdf/selection-text.ts.
       const range = selection.getRangeAt(0);
-      const text = getSelectionText(range, containerRef.current);
+      const text = getSelectionText(range, containerRef.current!);
       if (text) {
         onTextSelected!(text);
       }
     }
 
     document.addEventListener("selectionchange", handleSelectionChange);
-    return () => document.removeEventListener("selectionchange", handleSelectionChange);
+    return () => {
+      document.removeEventListener("selectionchange", handleSelectionChange);
+      setHasActiveSelection(false);
+    };
   }, [onTextSelected, penMode]);
 
   // A single tap (not a drag) selects the whole sentence under it, as an
@@ -183,6 +194,7 @@ export default function PdfViewer({
         className={`pdf-viewer-page${penMode ? " pen-mode-active" : ""}`}
         ref={pageWrapperRef}
         onClick={handleClick}
+        style={hasActiveSelection ? { touchAction: "none" } : undefined}
       >
         <div style={{ position: "relative" }}>
           <Document

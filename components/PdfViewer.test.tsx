@@ -179,6 +179,59 @@ describe("PdfViewer", () => {
     getSelectionSpy.mockRestore();
   });
 
+  it("suspends the page's scrolling while a real text selection is active inside the viewer, so dragging a selection handle isn't misread as a scroll", () => {
+    render(<PdfViewer fileUrl="/papers/example.pdf" onTextSelected={vi.fn()} />);
+    const pageWrapper = document.querySelector(".pdf-viewer-page") as HTMLElement;
+    expect(pageWrapper.style.touchAction).not.toBe("none");
+
+    const getSelectionSpy = vi.spyOn(window, "getSelection").mockReturnValue({
+      anchorNode: screen.getByTestId("document"),
+      isCollapsed: false,
+      getRangeAt: () => ({}) as Range,
+    } as unknown as Selection);
+    fireEvent(document, new Event("selectionchange"));
+
+    expect(pageWrapper.style.touchAction).toBe("none");
+    getSelectionSpy.mockRestore();
+  });
+
+  it("resumes normal scrolling once the selection is cleared", () => {
+    render(<PdfViewer fileUrl="/papers/example.pdf" onTextSelected={vi.fn()} />);
+    const pageWrapper = document.querySelector(".pdf-viewer-page") as HTMLElement;
+
+    const getSelectionSpy = vi.spyOn(window, "getSelection").mockReturnValue({
+      anchorNode: screen.getByTestId("document"),
+      isCollapsed: false,
+      getRangeAt: () => ({}) as Range,
+    } as unknown as Selection);
+    fireEvent(document, new Event("selectionchange"));
+    expect(pageWrapper.style.touchAction).toBe("none");
+
+    getSelectionSpy.mockReturnValue({
+      anchorNode: null,
+      isCollapsed: true,
+    } as unknown as Selection);
+    fireEvent(document, new Event("selectionchange"));
+
+    expect(pageWrapper.style.touchAction).not.toBe("none");
+    getSelectionSpy.mockRestore();
+  });
+
+  it("does not suspend scrolling for a selection made outside the viewer", () => {
+    render(<PdfViewer fileUrl="/papers/example.pdf" onTextSelected={vi.fn()} />);
+    const pageWrapper = document.querySelector(".pdf-viewer-page") as HTMLElement;
+
+    const getSelectionSpy = vi.spyOn(window, "getSelection").mockReturnValue({
+      anchorNode: document.body,
+      isCollapsed: false,
+      getRangeAt: () => ({}) as Range,
+    } as unknown as Selection);
+    fireEvent(document, new Event("selectionchange"));
+
+    expect(pageWrapper.style.touchAction).not.toBe("none");
+    getSelectionSpy.mockRestore();
+  });
+
   it("selects the whole sentence under a single tap, as an alternative to dragging a precise range", () => {
     const onTextSelected = vi.fn();
     const fakeRange = {} as Range;

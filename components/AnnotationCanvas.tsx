@@ -84,6 +84,7 @@ export default function AnnotationCanvas({
   const drawingPointsRef = useRef<Point[]>([]);
   const surfaceRef = useRef<SVGSVGElement>(null);
   const liveStrokeRef = useRef<SVGPolylineElement>(null);
+  const eraserCursorRef = useRef<SVGCircleElement>(null);
   const [pendingStrokes, setPendingStrokes] = useState<Stroke[]>([]);
 
   // Drop only the pending strokes that have actually appeared in the
@@ -98,6 +99,18 @@ export default function AnnotationCanvas({
   function toLocalPoint(event: { clientX: number; clientY: number }): Point {
     const rect = surfaceRef.current!.getBoundingClientRect();
     return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+  }
+
+  function showEraserCursor(point: Point) {
+    const cursor = eraserCursorRef.current;
+    if (!cursor) return;
+    cursor.setAttribute("cx", String(point.x));
+    cursor.setAttribute("cy", String(point.y));
+    cursor.setAttribute("opacity", "1");
+  }
+
+  function hideEraserCursor() {
+    eraserCursorRef.current?.setAttribute("opacity", "0");
   }
 
   function handlePointerDown(event: React.PointerEvent) {
@@ -124,7 +137,11 @@ export default function AnnotationCanvas({
 
     const point = toLocalPoint(event);
     drawingPointsRef.current = [point];
-    liveStrokeRef.current?.setAttribute("points", pointsAttribute(drawingPointsRef.current));
+    if (tool === "eraser") {
+      showEraserCursor(point);
+    } else {
+      liveStrokeRef.current?.setAttribute("points", pointsAttribute(drawingPointsRef.current));
+    }
   }
 
   function handlePointerMove(event: React.PointerEvent) {
@@ -134,6 +151,7 @@ export default function AnnotationCanvas({
     const localPoint = toLocalPoint(event);
 
     if (tool === "eraser") {
+      showEraserCursor(localPoint);
       strokes.forEach((stroke, index) => {
         const pixelStroke: Stroke = {
           points: stroke.points.map((point) => denormalizePoint(point, width, height)),
@@ -167,6 +185,7 @@ export default function AnnotationCanvas({
     }
     drawingPointsRef.current = [];
     liveStrokeRef.current?.setAttribute("points", "");
+    hideEraserCursor();
   }
 
   function handlePointerUp(event: React.PointerEvent) {
@@ -258,6 +277,28 @@ export default function AnnotationCanvas({
         strokeOpacity={tool === "highlighter" ? HIGHLIGHTER_OPACITY : DEFAULT_STROKE_OPACITY}
         strokeLinecap="round"
         strokeLinejoin="round"
+      />
+      {/*
+        Visual guide for how large an area the eraser reaches — matches
+        doesEraserPathIntersectStroke's own threshold (lib/annotations/
+        stroke-hit-test.ts): ERASER_RADIUS_PX plus half the *current* pen
+        width as a stand-in for whatever width the strokes on the page were
+        actually drawn with (not knowable in advance — this is an
+        approximation, not an exact per-stroke reach). Hidden (opacity 0)
+        except while actively erasing.
+      */}
+      <circle
+        ref={eraserCursorRef}
+        data-testid="eraser-cursor"
+        cx={0}
+        cy={0}
+        r={ERASER_RADIUS_PX + strokeWidth / 2}
+        fill="none"
+        stroke={DEFAULT_STROKE_COLOR}
+        strokeWidth={1.5}
+        strokeDasharray="4 3"
+        opacity={0}
+        pointerEvents="none"
       />
     </svg>
   );
