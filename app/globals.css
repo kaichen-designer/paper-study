@@ -273,7 +273,11 @@ button:disabled {
   padding: 0.6rem 0.75rem;
   margin-top: 0.75rem;
   background: var(--color-cream-card);
-  border-radius: var(--radius-pill);
+  /* Not --radius-pill: this toolbar now has enough content (tools, 8
+     colors, custom picker, width slider) to wrap across multiple rows,
+     and a full pill radius on a multi-row flex container clips oddly
+     into the wrapped rows' content instead of just rounding corners. */
+  border-radius: var(--radius-card);
 }
 
 .annotation-toolbar-group {
