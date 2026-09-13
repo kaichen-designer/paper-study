@@ -10,6 +10,11 @@ import { doesEraserPathIntersectStroke } from "@/lib/annotations/stroke-hit-test
 // data backfill.
 const DEFAULT_STROKE_COLOR = "#e63946";
 const DEFAULT_STROKE_WIDTH = 2;
+const DEFAULT_STROKE_OPACITY = 1;
+
+// Translucent enough that highlighted text stays readable underneath, but
+// still clearly visible as a highlight.
+const HIGHLIGHTER_OPACITY = 0.35;
 
 // Radius (in pixels of the currently rendered page) added to a stroke's own
 // half-width when deciding whether the eraser path reaches it — gives the
@@ -72,7 +77,7 @@ export default function AnnotationCanvas({
   onStrokeComplete: (strokes: Stroke[]) => void;
   strokeColor: string;
   strokeWidth: number;
-  tool: "pen" | "eraser";
+  tool: "pen" | "highlighter" | "eraser";
   onEraseStroke: (index: number) => void;
   interactive: boolean;
 }) {
@@ -133,11 +138,16 @@ export default function AnnotationCanvas({
   }
 
   function finishDrawing() {
-    if (tool === "pen" && drawingPointsRef.current.length > 1) {
+    if ((tool === "pen" || tool === "highlighter") && drawingPointsRef.current.length > 1) {
       const normalized = drawingPointsRef.current.map((point) =>
         normalizePoint(point, width, height)
       );
-      const stroke: Stroke = { points: normalized, color: strokeColor, width: strokeWidth };
+      const stroke: Stroke = {
+        points: normalized,
+        color: strokeColor,
+        width: strokeWidth,
+        ...(tool === "highlighter" ? { opacity: HIGHLIGHTER_OPACITY } : {}),
+      };
       setPendingStrokes((current) => [...current, stroke]);
       onStrokeComplete([stroke]);
     }
@@ -207,6 +217,7 @@ export default function AnnotationCanvas({
           fill="none"
           stroke={stroke.color ?? DEFAULT_STROKE_COLOR}
           strokeWidth={stroke.width ?? DEFAULT_STROKE_WIDTH}
+          strokeOpacity={stroke.opacity ?? DEFAULT_STROKE_OPACITY}
           strokeLinecap="round"
           strokeLinejoin="round"
         />
@@ -218,6 +229,7 @@ export default function AnnotationCanvas({
           fill="none"
           stroke={stroke.color ?? DEFAULT_STROKE_COLOR}
           strokeWidth={stroke.width ?? DEFAULT_STROKE_WIDTH}
+          strokeOpacity={stroke.opacity ?? DEFAULT_STROKE_OPACITY}
           strokeLinecap="round"
           strokeLinejoin="round"
         />
@@ -229,6 +241,7 @@ export default function AnnotationCanvas({
         fill="none"
         stroke={strokeColor}
         strokeWidth={strokeWidth}
+        strokeOpacity={tool === "highlighter" ? HIGHLIGHTER_OPACITY : DEFAULT_STROKE_OPACITY}
         strokeLinecap="round"
         strokeLinejoin="round"
       />

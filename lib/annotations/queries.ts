@@ -1,7 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Point } from "./stroke-geometry";
 
-export type Stroke = { points: Point[]; color?: string; width?: number };
+// `opacity` is set for highlighter strokes (translucent ink, so it doesn't
+// fully obscure the text underneath) — absent (full opacity) for ordinary
+// pen strokes, including ones saved before the highlighter tool existed.
+export type Stroke = { points: Point[]; color?: string; width?: number; opacity?: number };
 
 export type CreateStrokeNoteInput = {
   paperId: string;

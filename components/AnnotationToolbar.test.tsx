@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
-import AnnotationToolbar, { PALETTE, WIDTHS } from "./AnnotationToolbar";
+import { render, screen, fireEvent } from "@testing-library/react";
+import AnnotationToolbar, {
+  PALETTE,
+  MIN_WIDTH,
+  MAX_WIDTH,
+  DEFAULT_WIDTH,
+} from "./AnnotationToolbar";
 
 function setup(overrides: Partial<Parameters<typeof AnnotationToolbar>[0]> = {}) {
   const onToolChange = vi.fn();
@@ -10,7 +15,7 @@ function setup(overrides: Partial<Parameters<typeof AnnotationToolbar>[0]> = {})
     <AnnotationToolbar
       tool="pen"
       color={PALETTE[0]}
-      width={WIDTHS[1]}
+      width={DEFAULT_WIDTH}
       onToolChange={onToolChange}
       onColorChange={onColorChange}
       onWidthChange={onWidthChange}
@@ -37,11 +42,20 @@ describe("AnnotationToolbar", () => {
     expect(onToolChange).toHaveBeenCalledWith("pen");
   });
 
-  it("marks the currently selected tool button with aria-pressed=true, and the other false", () => {
-    setup({ tool: "eraser" });
+  it("calls onToolChange with 'highlighter' when the highlighter button is clicked", () => {
+    const { onToolChange } = setup();
+
+    screen.getByRole("button", { name: "螢光筆" }).click();
+
+    expect(onToolChange).toHaveBeenCalledWith("highlighter");
+  });
+
+  it("marks the currently selected tool button with aria-pressed=true, and the others false", () => {
+    setup({ tool: "highlighter" });
 
     expect(screen.getByRole("button", { name: "筆刷" })).toHaveAttribute("aria-pressed", "false");
-    expect(screen.getByRole("button", { name: "橡皮擦" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "螢光筆" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "橡皮擦" })).toHaveAttribute("aria-pressed", "false");
   });
 
   it("calls onColorChange with the clicked palette color", () => {
@@ -65,24 +79,33 @@ describe("AnnotationToolbar", () => {
     );
   });
 
-  it("calls onWidthChange with the clicked width option", () => {
-    const { onWidthChange } = setup();
+  it("offers a custom color picker, for colors outside the preset palette", () => {
+    const { onColorChange } = setup();
 
-    screen.getByTestId(`width-option-${WIDTHS[2]}`).click();
+    fireEvent.change(screen.getByLabelText("自訂顏色"), { target: { value: "#ff00aa" } });
 
-    expect(onWidthChange).toHaveBeenCalledWith(WIDTHS[2]);
+    expect(onColorChange).toHaveBeenCalledWith("#ff00aa");
   });
 
-  it("marks the currently selected width option with aria-pressed=true", () => {
-    setup({ width: WIDTHS[0] });
+  it("exposes a continuous width slider from MIN_WIDTH to MAX_WIDTH", () => {
+    setup();
 
-    expect(screen.getByTestId(`width-option-${WIDTHS[0]}`)).toHaveAttribute(
-      "aria-pressed",
-      "true"
-    );
-    expect(screen.getByTestId(`width-option-${WIDTHS[1]}`)).toHaveAttribute(
-      "aria-pressed",
-      "false"
-    );
+    const slider = screen.getByLabelText("筆畫粗細") as HTMLInputElement;
+    expect(slider.min).toBe(String(MIN_WIDTH));
+    expect(slider.max).toBe(String(MAX_WIDTH));
+  });
+
+  it("calls onWidthChange with the slider's new numeric value", () => {
+    const { onWidthChange } = setup();
+
+    fireEvent.change(screen.getByLabelText("筆畫粗細"), { target: { value: "5.5" } });
+
+    expect(onWidthChange).toHaveBeenCalledWith(5.5);
+  });
+
+  it("reflects the current width as the slider's value", () => {
+    setup({ width: 7 });
+
+    expect(screen.getByLabelText("筆畫粗細")).toHaveValue("7");
   });
 });

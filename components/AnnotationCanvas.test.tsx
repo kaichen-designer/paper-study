@@ -279,4 +279,58 @@ describe("AnnotationCanvas", () => {
     );
     expect(visiblePoints).toContain("100,100 200,200");
   });
+
+  it("with the highlighter tool, drawing saves a translucent stroke", () => {
+    const { surface, onStrokeComplete } = setupCanvas({ tool: "highlighter" });
+
+    fireEvent.pointerDown(surface, { clientX: 80, clientY: 60, pointerType: "pen" });
+    fireEvent.pointerMove(surface, { clientX: 400, clientY: 300, pointerType: "pen" });
+    fireEvent.pointerUp(surface, { clientX: 400, clientY: 300, pointerType: "pen" });
+
+    expect(onStrokeComplete).toHaveBeenCalledTimes(1);
+    const [strokes] = onStrokeComplete.mock.calls[0];
+    expect(strokes[0].opacity).toBeGreaterThan(0);
+    expect(strokes[0].opacity).toBeLessThan(1);
+  });
+
+  it("with the pen tool, drawing saves a fully opaque stroke (no opacity field)", () => {
+    const { surface, onStrokeComplete } = setupCanvas({ tool: "pen" });
+
+    fireEvent.pointerDown(surface, { clientX: 80, clientY: 60, pointerType: "pen" });
+    fireEvent.pointerMove(surface, { clientX: 400, clientY: 300, pointerType: "pen" });
+    fireEvent.pointerUp(surface, { clientX: 400, clientY: 300, pointerType: "pen" });
+
+    const [strokes] = onStrokeComplete.mock.calls[0];
+    expect(strokes[0].opacity).toBeUndefined();
+  });
+
+  it("with the highlighter tool, dragging over an existing stroke never calls onEraseStroke (only the eraser tool erases)", () => {
+    const { surface, onEraseStroke } = setupCanvas({
+      tool: "highlighter",
+      strokes: [{ points: [{ x: 0.1, y: 0.1 }, { x: 0.9, y: 0.1 }], width: 2 }],
+    });
+
+    fireEvent.pointerDown(surface, { clientX: 400, clientY: 60, pointerType: "pen" });
+    fireEvent.pointerMove(surface, { clientX: 400, clientY: 62, pointerType: "pen" });
+
+    expect(onEraseStroke).not.toHaveBeenCalled();
+  });
+
+  it("renders a saved highlighter stroke with reduced stroke-opacity", () => {
+    setupCanvas({
+      strokes: [{ points: [{ x: 0.1, y: 0.1 }, { x: 0.5, y: 0.5 }], opacity: 0.35 }],
+    });
+
+    const polyline = document.querySelector("polyline") as SVGPolylineElement;
+    expect(polyline.getAttribute("stroke-opacity")).toBe("0.35");
+  });
+
+  it("renders a saved pen stroke (no opacity field) fully opaque", () => {
+    setupCanvas({
+      strokes: [{ points: [{ x: 0.1, y: 0.1 }, { x: 0.5, y: 0.5 }] }],
+    });
+
+    const polyline = document.querySelector("polyline") as SVGPolylineElement;
+    expect(polyline.getAttribute("stroke-opacity")).toBe("1");
+  });
 });

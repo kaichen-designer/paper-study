@@ -8,7 +8,7 @@ import { canGoNext, canGoPrevious, clampPage, nextPage, previousPage } from "@/l
 import { getSelectionText } from "@/lib/pdf/selection-text";
 import { expandToSentence } from "@/lib/pdf/sentence-selection";
 import AnnotationCanvas from "./AnnotationCanvas";
-import AnnotationToolbar, { PALETTE, WIDTHS } from "./AnnotationToolbar";
+import AnnotationToolbar, { PALETTE, DEFAULT_WIDTH } from "./AnnotationToolbar";
 import type { Stroke } from "@/lib/annotations/queries";
 import type { PdfDocumentProxy } from "@/lib/pdf/extract-full-text";
 
@@ -43,9 +43,9 @@ export default function PdfViewer({
   const [pageWidth, setPageWidth] = useState<number | undefined>(undefined);
   const [pageAspectRatio, setPageAspectRatio] = useState(DEFAULT_ASPECT_RATIO);
   const [penMode, setPenMode] = useState(false);
-  const [tool, setTool] = useState<"pen" | "eraser">("pen");
+  const [tool, setTool] = useState<"pen" | "highlighter" | "eraser">("pen");
   const [strokeColor, setStrokeColor] = useState(PALETTE[0]);
-  const [strokeWidth, setStrokeWidth] = useState(WIDTHS[1]);
+  const [strokeWidth, setStrokeWidth] = useState(DEFAULT_WIDTH);
   const containerRef = useRef<HTMLDivElement>(null);
   const pageWrapperRef = useRef<HTMLDivElement>(null);
 
@@ -91,7 +91,7 @@ export default function PdfViewer({
     if (penMode) {
       setTool("pen");
       setStrokeColor(PALETTE[0]);
-      setStrokeWidth(WIDTHS[1]);
+      setStrokeWidth(DEFAULT_WIDTH);
     }
   }, [penMode]);
 
