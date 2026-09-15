@@ -75,6 +75,7 @@ export async function callGemini({
         };
 
         if (!RETRYABLE_STATUS_CODES.has(response.status) || attempt === MAX_RETRIES) {
+          console.error(`[callGemini] giving up after ${attempt + 1} attempt(s):`, failure.message);
           return failure;
         }
 
@@ -93,10 +94,9 @@ export async function callGemini({
 
       return { ok: true, text };
     } catch (err) {
-      return {
-        ok: false,
-        message: `無法連線至 Gemini:${err instanceof Error ? err.message : String(err)}`,
-      };
+      const message = `無法連線至 Gemini:${err instanceof Error ? err.message : String(err)}`;
+      console.error(`[callGemini] network exception on attempt ${attempt + 1}:`, message);
+      return { ok: false, message };
     }
   }
 
