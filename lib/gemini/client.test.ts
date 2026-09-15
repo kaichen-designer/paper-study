@@ -135,4 +135,20 @@ describe("callGemini", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(sleep).not.toHaveBeenCalled();
   });
+
+  it("does not retry a 429 (Gemini free-tier daily quota errors reuse the rate-limit status code, so retrying just burns more of the scarce daily allowance)", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 429,
+      text: async () => "Quota exceeded for metric: generate_content_free_tier_requests",
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const sleep = vi.fn().mockResolvedValue(undefined);
+
+    const result = await callGemini({ prompt: "hello", apiKey: "k", retryDeps: { sleep } });
+
+    expect(result).toEqual({ ok: false, message: expect.stringContaining("429") });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+  });
 });

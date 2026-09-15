@@ -9,7 +9,7 @@ export type GenerateReflectionReplyResult =
   | { ok: false; message: string };
 
 type Deps = {
-  provider: (args: { prompt: string; apiKey: string }) => Promise<GeminiResult>;
+  provider: (args: { prompt: string; apiKey: string; model?: string }) => Promise<GeminiResult>;
   saveMessage: typeof saveReflectionMessage;
 };
 
@@ -17,6 +17,13 @@ const defaultDeps: Deps = {
   provider: callGemini,
   saveMessage: saveReflectionMessage,
 };
+
+// TEMPORARY: gemini-3.6-flash's free-tier daily quota (20 req/day) is
+// exhausted. Gemini quota is tracked per model, so borrowing the lighter
+// model translation already uses gets reflection chat back online today on
+// a separate, unexhausted quota bucket. Revert to callGemini's own default
+// (gemini-3.6-flash) once the quota resets or billing is upgraded.
+const REFLECTION_MODEL = "gemini-3.1-flash-lite";
 
 function buildPrompt({
   paperFullText,
@@ -68,7 +75,7 @@ export async function generateReflectionReply({
 }): Promise<GenerateReflectionReplyResult> {
   const prompt = buildPrompt({ paperFullText, conversationHistory, userMessage });
 
-  const result = await deps.provider({ prompt, apiKey });
+  const result = await deps.provider({ prompt, apiKey, model: REFLECTION_MODEL });
   if (!result.ok) {
     return { ok: false, message: result.message };
   }

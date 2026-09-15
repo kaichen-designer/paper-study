@@ -26,6 +26,24 @@ describe("generateReflectionReply", () => {
     expect(callArgs.prompt).toContain("我覺得這篇論文在講 ABC");
   });
 
+  it("uses the gemini-3.1-flash-lite model (temporary: gemini-3.6-flash's free-tier daily quota is exhausted)", async () => {
+    const provider = vi.fn().mockResolvedValue({ ok: true, text: "AI 回應內容" });
+    const saveMessage = vi.fn().mockResolvedValue({ id: "m1" });
+
+    await generateReflectionReply({
+      supabase: makeSupabaseStub(),
+      paperId: "p1",
+      paperFullText: "全文",
+      conversationHistory: [],
+      userMessage: "心得",
+      apiKey: "key",
+      deps: { provider, saveMessage },
+    });
+
+    const [callArgs] = provider.mock.calls[0];
+    expect(callArgs.model).toBe("gemini-3.1-flash-lite");
+  });
+
   it("saves the user message then the assistant reply, in that order, on success", async () => {
     const provider = vi.fn().mockResolvedValue({ ok: true, text: "AI 回應內容" });
     const saveMessage = vi.fn().mockResolvedValue({ id: "m1" });

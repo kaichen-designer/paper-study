@@ -6,9 +6,17 @@ function endpointFor(model: string): string {
 
 export type GeminiResult = { ok: true; text: string } | { ok: false; message: string };
 
-// HTTP statuses that indicate a transient, retry-worthy failure (rate limiting or a
-// server-side hiccup) as opposed to a request/auth problem that a retry can't fix.
-const RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
+// HTTP statuses that indicate a transient, retry-worthy failure (a server-side
+// hiccup) as opposed to a request/auth problem that a retry can't fix.
+//
+// 429 is deliberately excluded even though it's nominally "rate limiting":
+// Gemini's free tier returns 429 both for short-lived per-minute throttling
+// AND for the per-day-per-model quota being exhausted (same status code,
+// distinguished only by the error body's quotaId). Retrying the latter
+// wastes 2 extra calls of an already-scarce daily allowance (as low as
+// 20 requests/day/model) for no chance of success, so 429 is treated as
+// non-retryable here — a single wasted retry is worse than a fast failure.
+const RETRYABLE_STATUS_CODES = new Set([500, 502, 503, 504]);
 const MAX_RETRIES = 2;
 const BASE_DELAY_MS = 500;
 const JITTER_MS = 200;
@@ -37,11 +45,11 @@ const defaultRetryDeps: RetryDeps = {
  * Never throws: every failure path (bad status, network error, empty
  * response) resolves to an { ok: false, message } result.
  *
- * Transient failures (HTTP 429/500/502/503/504) are retried internally with
+ * Transient failures (HTTP 500/502/503/504) are retried internally with
  * exponential backoff + jitter, up to MAX_RETRIES times, before giving up
  * and returning the same { ok: false, message } shape as a non-retried
  * failure — callers don't need to know a retry happened. Non-retryable
- * errors (e.g. 401/403) and network exceptions fail immediately.
+ * errors (e.g. 401/403/429) and network exceptions fail immediately.
  * `retryDeps` is an internal test seam (default: real setTimeout-based
  * sleep) — production callers never need to pass it.
  */
