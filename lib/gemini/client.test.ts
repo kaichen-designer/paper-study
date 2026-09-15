@@ -83,4 +83,56 @@ describe("callGemini", () => {
     expect(url).toContain("gemini-3.1-flash-lite");
     expect(url).not.toContain("gemini-3.6-flash");
   });
+
+  it("retries a transient error and succeeds on the second attempt", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status: 503, text: async () => "" })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ candidates: [{ content: { parts: [{ text: "回應內容" }] } }] }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+    const sleep = vi.fn().mockResolvedValue(undefined);
+
+    const result = await callGemini({ prompt: "hello", apiKey: "k", retryDeps: { sleep } });
+
+    expect(result).toEqual({ ok: true, text: "回應內容" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns the existing error format after exhausting retries on a transient error", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 503,
+      text: async () => "Service Unavailable",
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const sleep = vi.fn().mockResolvedValue(undefined);
+
+    const result = await callGemini({ prompt: "hello", apiKey: "k", retryDeps: { sleep } });
+
+    expect(result).toEqual({
+      ok: false,
+      message: expect.stringContaining("503"),
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not retry a non-retryable error and returns immediately", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      text: async () => "API key invalid",
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const sleep = vi.fn().mockResolvedValue(undefined);
+
+    const result = await callGemini({ prompt: "hello", apiKey: "k", retryDeps: { sleep } });
+
+    expect(result).toEqual({ ok: false, message: expect.stringContaining("401") });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+  });
 });
