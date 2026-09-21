@@ -8,6 +8,7 @@ import { canGoNext, canGoPrevious, clampPage, nextPage, previousPage } from "@/l
 import { getSelectionText } from "@/lib/pdf/selection-text";
 import { expandToSentence } from "@/lib/pdf/sentence-selection";
 import AnnotationCanvas from "./AnnotationCanvas";
+import { formatReport, inkDebugEnabled, type StrokeReport } from "@/lib/annotations/ink-profiler";
 import AnnotationToolbar, { PALETTE, DEFAULT_WIDTH } from "./AnnotationToolbar";
 import type { Stroke } from "@/lib/annotations/queries";
 import type { PdfDocumentProxy } from "@/lib/pdf/extract-full-text";
@@ -47,6 +48,9 @@ export default function PdfViewer({
   const [strokeColor, setStrokeColor] = useState(PALETTE[0]);
   const [strokeWidth, setStrokeWidth] = useState(DEFAULT_WIDTH);
   const [hasActiveSelection, setHasActiveSelection] = useState(false);
+  // Diagnostic only, opt-in via ?inkdebug=1 — see lib/annotations/ink-profiler.ts.
+  const [inkReport, setInkReport] = useState<StrokeReport | null>(null);
+  const inkDebug = typeof window !== "undefined" && inkDebugEnabled(window.location.search);
   const containerRef = useRef<HTMLDivElement>(null);
   const pageWrapperRef = useRef<HTMLDivElement>(null);
 
@@ -238,6 +242,17 @@ export default function PdfViewer({
               left: 0,
               zIndex: 10,
               pointerEvents: penMode ? "auto" : "none",
+              // Put the ink overlay on its own compositing layer. Without
+              // this it shares a layer with the PDF canvas beneath it and
+              // the pen-mode box-shadows, so every rewrite of the live
+              // stroke's `d` repaints all of that on the CPU — which is
+              // what makes drawing lag while erasing (same JS cost, but it
+              // only moves a tiny cursor circle) stays smooth.
+              transform: "translateZ(0)",
+              // Hint only while pen mode is on, so the layer is created
+              // when the mode is toggled rather than on the first stroke,
+              // and no memory is held for it while merely reading.
+              willChange: penMode ? "transform" : "auto",
             }}
           >
             <AnnotationCanvas
@@ -250,8 +265,30 @@ export default function PdfViewer({
               tool={tool}
               onEraseStroke={(index) => onEraseStroke?.(index)}
               interactive={penMode}
+              onProfileReport={inkDebug ? setInkReport : undefined}
             />
           </div>
+          {inkDebug && (
+            <pre
+              data-testid="ink-debug-hud"
+              style={{
+                position: "absolute",
+                top: 4,
+                left: 4,
+                zIndex: 20,
+                margin: 0,
+                padding: "6px 8px",
+                font: "11px/1.35 ui-monospace, monospace",
+                color: "#d6f5d6",
+                background: "rgba(0,0,0,0.78)",
+                borderRadius: 6,
+                pointerEvents: "none",
+                whiteSpace: "pre",
+              }}
+            >
+              {inkReport ? formatReport(inkReport) : "ink profiler armed — draw a stroke"}
+            </pre>
+          )}
         </div>
       </div>
       {penMode && (

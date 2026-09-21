@@ -9,6 +9,7 @@ import {
 } from "@/lib/annotations/stroke-geometry";
 import type { Stroke } from "@/lib/annotations/queries";
 import { doesEraserPathIntersectStroke } from "@/lib/annotations/stroke-hit-test";
+import { InkProfiler, inkDebugEnabled, type StrokeReport } from "@/lib/annotations/ink-profiler";
 
 // Strokes saved before color/width support existed have neither field —
 // render them the same way they always looked, rather than requiring a
@@ -81,6 +82,7 @@ export default function AnnotationCanvas({
   tool,
   onEraseStroke,
   interactive,
+  onProfileReport,
 }: {
   width: number;
   height: number;
@@ -91,12 +93,15 @@ export default function AnnotationCanvas({
   tool: "pen" | "highlighter" | "eraser";
   onEraseStroke: (index: number) => void;
   interactive: boolean;
+  // Diagnostic only, opt-in via ?inkdebug=1 — see lib/annotations/ink-profiler.ts.
+  onProfileReport?: (report: StrokeReport) => void;
 }) {
   const drawingPointsRef = useRef<Point[]>([]);
   const surfaceRef = useRef<SVGSVGElement>(null);
   const liveStrokeRef = useRef<SVGPathElement>(null);
   const eraserCursorRef = useRef<SVGCircleElement>(null);
   const [pendingStrokes, setPendingStrokes] = useState<Stroke[]>([]);
+  const profilerRef = useRef<InkProfiler | null>(null);
 
   // Drop only the pending strokes that have actually appeared in the
   // parent's `strokes` prop — not the whole buffer, since other strokes
@@ -172,6 +177,11 @@ export default function AnnotationCanvas({
       // requirement; drawing still works without it.
     }
 
+    if (inkDebugEnabled(window.location.search)) {
+      profilerRef.current = new InkProfiler(strokes.length);
+      profilerRef.current.begin(performance.now());
+    }
+
     const point = toLocalPoint(event);
     drawingPointsRef.current = [point];
     if (tool === "eraser") {
@@ -185,7 +195,29 @@ export default function AnnotationCanvas({
     if (!interactive || event.pointerType === "touch") return;
     if (drawingPointsRef.current.length === 0) return;
     event.preventDefault();
+
+    const profiler = profilerRef.current;
+    if (!profiler) {
+      recordPoint(toLocalPoint(event));
+      return;
+    }
+
+    const handlerStart = performance.now();
     recordPoint(toLocalPoint(event));
+    const handlerEnd = performance.now();
+    const native = event.nativeEvent as PointerEvent & {
+      getCoalescedEvents?: () => unknown[];
+    };
+    profiler.recordMove({
+      // event.timeStamp shares performance.now()'''s origin in every browser
+      // that matters here, so the difference is how long the event sat
+      // before our handler ran.
+      inputLatency: handlerStart - event.timeStamp,
+      handlerMs: handlerEnd - handlerStart,
+      coalesced: native.getCoalescedEvents?.().length ?? 1,
+      pointCount: drawingPointsRef.current.length,
+      pathLength: liveStrokeRef.current?.getAttribute("d")?.length ?? 0,
+    });
   }
 
   function finishDrawing() {
@@ -205,6 +237,18 @@ export default function AnnotationCanvas({
     drawingPointsRef.current = [];
     liveStrokeRef.current?.setAttribute("d", "");
     hideEraserCursor();
+
+    const profiler = profilerRef.current;
+    if (profiler) {
+      profilerRef.current = null;
+      profiler.markRelease(performance.now());
+      // Two frames: the first carries the repaint triggered by the
+      // release, the second guarantees it has been observed before the
+      // rAF loop is torn down.
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => onProfileReport?.(profiler.end(performance.now())))
+      );
+    }
   }
 
   function handlePointerUp(event: React.PointerEvent) {
