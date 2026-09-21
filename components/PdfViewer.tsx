@@ -58,12 +58,33 @@ export default function PdfViewer({
   // preventDefault() on pointerdown does not reliably stop this on iOS,
   // so refuse the selection itself. Only while drawing -- selecting text
   // is how translation is invoked the rest of the time.
+  //
+  // Refusing new selections is not enough on its own. Once a selection
+  // exists on screen iOS gives it drag handles, and a pen landing near
+  // one moves that handle instead of starting a fresh gesture -- so a
+  // single stray selection keeps eating strokes until it is dismissed,
+  // no matter how fast or slow the writing is. Clear it on entering pen
+  // mode and again as each stroke begins.
   useEffect(() => {
     const wrapper = pageWrapperRef.current;
     if (!wrapper || !penMode) return;
+
+    const dropSelection = () => {
+      const selection = window.getSelection();
+      if (selection && !selection.isCollapsed) selection.removeAllRanges();
+    };
+
     const refuse = (event: Event) => event.preventDefault();
+
+    dropSelection();
     wrapper.addEventListener("selectstart", refuse);
-    return () => wrapper.removeEventListener("selectstart", refuse);
+    // Capture phase: get ahead of anything that would act on a lingering
+    // selection before the stroke has a chance to start.
+    wrapper.addEventListener("pointerdown", dropSelection, true);
+    return () => {
+      wrapper.removeEventListener("selectstart", refuse);
+      wrapper.removeEventListener("pointerdown", dropSelection, true);
+    };
   }, [penMode]);
   const containerRef = useRef<HTMLDivElement>(null);
   const pageWrapperRef = useRef<HTMLDivElement>(null);
@@ -282,29 +303,6 @@ export default function PdfViewer({
               onProfileReport={inkDebug ? setInkReport : undefined}
             />
           </div>
-          {inkDebug && (
-            <pre
-              data-testid="ink-debug-hud"
-              style={{
-                position: "absolute",
-                top: 4,
-                left: 4,
-                zIndex: 20,
-                margin: 0,
-                padding: "6px 8px",
-                font: "11px/1.35 ui-monospace, monospace",
-                color: "#d6f5d6",
-                background: "rgba(0,0,0,0.78)",
-                borderRadius: 6,
-                pointerEvents: "none",
-                userSelect: "none",
-                WebkitUserSelect: "none",
-                whiteSpace: "pre",
-              }}
-            >
-              {inkReport ? formatReport(inkReport) : "ink profiler armed — draw a stroke"}
-            </pre>
-          )}
         </div>
       </div>
       {penMode && (
@@ -316,6 +314,32 @@ export default function PdfViewer({
           onColorChange={setStrokeColor}
           onWidthChange={setStrokeWidth}
         />
+      )}
+      {inkDebug && (
+        <pre
+          data-testid="ink-debug-hud"
+          style={{
+            margin: "8px 0 0",
+            padding: "6px 8px",
+            font: "11px/1.35 ui-monospace, monospace",
+            color: "#d6f5d6",
+            background: "rgba(0,0,0,0.78)",
+            borderRadius: 6,
+            // Below the page, never over it. Overlaying the drawing area
+            // made this diagnostic a participant in the bug it was meant
+            // to observe: its own text became a selection target sitting
+            // above the canvas.
+            pointerEvents: "none",
+            userSelect: "none",
+            WebkitUserSelect: "none",
+            whiteSpace: "pre",
+            overflowX: "auto",
+          }}
+        >
+          {`build ${process.env.NEXT_PUBLIC_BUILD_SHA ?? "?"}
+`}
+          {inkReport ? formatReport(inkReport) : "ink profiler armed — draw a stroke"}
+        </pre>
       )}
       <div className="pdf-viewer-controls">
         <button

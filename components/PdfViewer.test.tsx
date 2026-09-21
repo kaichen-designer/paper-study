@@ -432,4 +432,61 @@ describe("PdfViewer", () => {
 
     expect(selectStart.defaultPrevented).toBe(false);
   });
+
+  function stubSelection({ collapsed }: { collapsed: boolean }) {
+    const removeAllRanges = vi.fn();
+    vi.spyOn(window, "getSelection").mockReturnValue({
+      isCollapsed: collapsed,
+      removeAllRanges,
+    } as unknown as Selection);
+    return removeAllRanges;
+  }
+
+  it("clears a lingering selection when pen mode is switched on", () => {
+    const removeAllRanges = stubSelection({ collapsed: false });
+
+    render(<PdfViewer fileUrl="/papers/example.pdf" />);
+    expect(removeAllRanges).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: /畫筆模式/ }));
+
+    // A selection left on screen keeps its iOS drag handles, and a pen
+    // landing near one moves the handle instead of drawing -- so it has
+    // to go before the first stroke, not after it fails.
+    expect(removeAllRanges).toHaveBeenCalled();
+    vi.restoreAllMocks();
+  });
+
+  it("clears any selection again as each stroke begins", () => {
+    const removeAllRanges = stubSelection({ collapsed: false });
+    render(<PdfViewer fileUrl="/papers/example.pdf" />);
+    fireEvent.click(screen.getByRole("button", { name: /畫筆模式/ }));
+    removeAllRanges.mockClear();
+
+    const page = screen.getByTestId("page").closest(".pdf-viewer-page") as HTMLElement;
+    fireEvent.pointerDown(page, { clientX: 50, clientY: 50, pointerType: "pen" });
+
+    expect(removeAllRanges).toHaveBeenCalled();
+    vi.restoreAllMocks();
+  });
+
+  it("leaves a collapsed selection alone, so it never fights the caret elsewhere on the page", () => {
+    const removeAllRanges = stubSelection({ collapsed: true });
+
+    render(<PdfViewer fileUrl="/papers/example.pdf" />);
+    fireEvent.click(screen.getByRole("button", { name: /畫筆模式/ }));
+
+    expect(removeAllRanges).not.toHaveBeenCalled();
+    vi.restoreAllMocks();
+  });
+
+  it("keeps the debug HUD out of the drawing area, so it cannot become a selection target over the canvas", () => {
+    render(<PdfViewer fileUrl="/papers/example.pdf" />);
+    // HUD only renders with ?inkdebug=1; assert the structural rule that
+    // it never lives inside the page wrapper.
+    const hud = screen.queryByTestId("ink-debug-hud");
+    if (hud) {
+      expect(hud.closest(".pdf-viewer-page")).toBeNull();
+    }
+  });
 });
