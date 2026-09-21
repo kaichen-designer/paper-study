@@ -58,11 +58,14 @@ describe("AnnotationCanvas", () => {
     expect(strokes[0].points[1]).toEqual({ x: 0.5, y: 0.5 });
   });
 
-  it("does not call onStrokeComplete for a tap with no movement", () => {
+  it("ignores a pointerdown that never completes, so a pen resting on the page saves nothing", () => {
     const { surface, onStrokeComplete } = setupCanvas();
 
+    // Deliberate reversal of earlier behaviour: a motionless tap used to
+    // be discarded to avoid stray dots, but that also dropped marks the
+    // user meant to make, at random (see isCompletedMark). A press is
+    // now a mark; what still saves nothing is a press with no release.
     fireEvent.pointerDown(surface, { clientX: 80, clientY: 60 });
-    fireEvent.pointerUp(surface, { clientX: 80, clientY: 60 });
 
     expect(onStrokeComplete).not.toHaveBeenCalled();
   });
@@ -298,6 +301,23 @@ describe("AnnotationCanvas", () => {
     // All three intermediate samples are in the path, not just the last.
     expect(livePath.getAttribute("d")).toContain("200");
     expect(livePath.getAttribute("d")).toContain("300 220");
+  });
+
+  it("draws a dot for a tap, instead of silently discarding it", () => {
+    const { surface, onStrokeComplete } = setupCanvas();
+
+    // A quick jab with the pencil: down and up at the same place, with
+    // no movement in between. This is a mark the user meant to make --
+    // a full stop, a tittle, the dot of a 點 -- not a stray touch.
+    fireEvent.pointerDown(surface, { clientX: 400, clientY: 300, pointerType: "pen" });
+    fireEvent.pointerUp(surface, { clientX: 400, clientY: 300, pointerType: "pen" });
+
+    expect(onStrokeComplete).toHaveBeenCalledTimes(1);
+    const [[strokes]] = onStrokeComplete.mock.calls;
+    expect(strokes[0].points).toEqual([
+      { x: 0.5, y: 0.5 },
+      { x: 0.5, y: 0.5 },
+    ]);
   });
 
   it("captures the pointer on the drawing surface, not on whatever stroke lies underneath", () => {

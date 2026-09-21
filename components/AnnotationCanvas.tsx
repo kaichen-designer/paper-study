@@ -28,14 +28,19 @@ const HIGHLIGHTER_OPACITY = 0.35;
 // eraser some forgiveness beyond the exact line geometry.
 const ERASER_RADIUS_PX = 10;
 
-// A stroke needs at least two DIFFERING points — otherwise it's a
-// stationary tap, not a drawn mark. Point *count* alone isn't enough: once
-// pointerup also records its own position (see handlePointerUp), a truly
-// motionless tap ends up with two identical points, not one.
-function hasMeaningfulMovement(points: Point[]): boolean {
-  if (points.length < 2) return false;
-  const [first] = points;
-  return points.some((point) => point.x !== first.x || point.y !== first.y);
+// A completed press-and-release is a mark, whether or not the pen moved
+// between the two.
+//
+// This previously also required the points to DIFFER, to avoid saving a
+// motionless tap. In practice that discarded marks the user meant to
+// make: whether a quick jab registers even one pixel of travel is close
+// to a coin flip, so the same gesture was sometimes drawn and sometimes
+// silently dropped. Intermittent disappearing strokes are far worse than
+// an occasional unintended dot, and a tap leaving a dot is what a pen is
+// expected to do. Rendered as a dot by the round linecap on a zero
+// length path.
+function isCompletedMark(points: Point[]): boolean {
+  return points.length >= 2;
 }
 
 // Compares by geometry only (not color/width) — a stroke's points are its
@@ -315,7 +320,7 @@ export default function AnnotationCanvas({
     // and dropping them would shorten every stroke by up to one frame.
     flushLiveStroke();
 
-    if ((tool === "pen" || tool === "highlighter") && hasMeaningfulMovement(drawingPointsRef.current)) {
+    if ((tool === "pen" || tool === "highlighter") && isCompletedMark(drawingPointsRef.current)) {
       const normalized = drawingPointsRef.current.map((point) =>
         normalizePoint(point, width, height)
       );
