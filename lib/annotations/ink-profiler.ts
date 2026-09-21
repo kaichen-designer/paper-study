@@ -43,6 +43,13 @@ export type StrokeReport = {
   savedStrokes: number;
   /** ms from pointerup to the next painted frame. */
   releaseToPaintMs: number;
+  /**
+   * Latency of the very first pointermove of the stroke. Broken out
+   * because the delay is concentrated at the start of a gesture: a long
+   * stroke's median hides it behind dozens of later, prompt events,
+   * which is exactly why it reads as "the pen is slow to start".
+   */
+  firstMoveLatency: number;
 };
 
 export type Stats = { median: number; p95: number; max: number };
@@ -116,6 +123,7 @@ export class InkProfiler {
       longFrames: gaps.filter((g) => g > 16.7).length,
       frameCount: gaps.length,
       finalPathLength: this.moves.at(-1)?.pathLength ?? 0,
+      firstMoveLatency: this.moves[0]?.inputLatency ?? 0,
       savedStrokes: this.savedStrokes,
       releaseToPaintMs: this.releaseToPaint,
     };
@@ -127,10 +135,24 @@ export function inkDebugEnabled(search: string): boolean {
   return new URLSearchParams(search).get("inkdebug") === "1";
 }
 
+/**
+ * Lets the drawing surface's `touch-action` be overridden from the URL,
+ * so the two candidate values can be compared on one build instead of
+ * shipping a guess. `pinch-zoom` (the default) leaves two-finger zoom
+ * working but requires WebKit to hold pointer events until it knows the
+ * gesture is not a pinch; `none` commits immediately at the cost of that
+ * zoom. Only the start of a stroke should differ between them.
+ */
+export function touchActionOverride(search: string): "none" | "pinch-zoom" | null {
+  const value = new URLSearchParams(search).get("inktouch");
+  return value === "none" || value === "pinch-zoom" ? value : null;
+}
+
 export function formatReport(r: StrokeReport): string {
   const s = (v: Stats) => `${v.median.toFixed(1)}/${v.p95.toFixed(1)}/${v.max.toFixed(1)}`;
   return [
-    `pts ${r.points} in ${r.durationMs.toFixed(0)}ms  (${r.movesPerSecond.toFixed(0)} moves/s, ${r.samplesPerSecond.toFixed(0)} samples/s)`,
+    `${r.points} moves in ${r.durationMs.toFixed(0)}ms  (${r.movesPerSecond.toFixed(0)}/s, ${r.samplesPerSecond.toFixed(0)} pen samples/s)`,
+    `FIRST move latency ${r.firstMoveLatency.toFixed(1)} ms   <-- slow to start`,
     `input latency  med/p95/max  ${s(r.inputLatency)} ms`,
     `our handler    med/p95/max  ${s(r.handlerMs)} ms`,
     `FRAME interval med/p95/max  ${s(r.frameMs)} ms   <-- stutter`,

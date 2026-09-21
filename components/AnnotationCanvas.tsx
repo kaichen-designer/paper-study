@@ -10,7 +10,12 @@ import {
 } from "@/lib/annotations/stroke-geometry";
 import type { Stroke } from "@/lib/annotations/queries";
 import { doesEraserPathIntersectStroke } from "@/lib/annotations/stroke-hit-test";
-import { InkProfiler, inkDebugEnabled, type StrokeReport } from "@/lib/annotations/ink-profiler";
+import {
+  InkProfiler,
+  inkDebugEnabled,
+  touchActionOverride,
+  type StrokeReport,
+} from "@/lib/annotations/ink-profiler";
 
 // Strokes saved before color/width support existed have neither field —
 // render them the same way they always looked, rather than requiring a
@@ -106,6 +111,8 @@ export default function AnnotationCanvas({
   const eraserCursorRef = useRef<SVGCircleElement>(null);
   const [pendingStrokes, setPendingStrokes] = useState<Stroke[]>([]);
   const profilerRef = useRef<InkProfiler | null>(null);
+  const touchAction =
+    (typeof window !== "undefined" && touchActionOverride(window.location.search)) || "pinch-zoom";
 
   // Drop only the pending strokes that have actually appeared in the
   // parent's `strokes` prop — not the whole buffer, since other strokes
@@ -343,7 +350,12 @@ export default function AnnotationCanvas({
       onPointerUp={handlePointerUp}
       onPointerCancel={finishDrawing}
       style={{
-        touchAction: interactive ? "pinch-zoom" : "auto",
+        // `pinch-zoom` keeps two-finger zoom available while drawing, at
+        // the cost of WebKit holding the opening pointer events of every
+        // stroke until it can rule out a pinch. ?inktouch= overrides it
+        // so both values can be measured against each other on one
+        // build; see touchActionOverride.
+        touchAction: interactive ? touchAction : "auto",
         pointerEvents: interactive ? "auto" : "none",
       }}
     >

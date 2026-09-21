@@ -1,5 +1,11 @@
 import { describe, expect, test, vi } from "vitest";
-import { InkProfiler, formatReport, inkDebugEnabled, summarize } from "./ink-profiler";
+import {
+  InkProfiler,
+  formatReport,
+  inkDebugEnabled,
+  summarize,
+  touchActionOverride,
+} from "./ink-profiler";
 
 describe("summarize", () => {
   test("returns zeroes for no samples rather than NaN", () => {
@@ -103,5 +109,58 @@ describe("InkProfiler", () => {
       flush();
       expect(() => formatReport(profiler.end(1))).not.toThrow();
     });
+  });
+});
+
+describe("touchActionOverride", () => {
+  test("returns null when absent, so the default stays in the component", () => {
+    expect(touchActionOverride("")).toBeNull();
+    expect(touchActionOverride("?inkdebug=1")).toBeNull();
+  });
+
+  test("accepts only the two values worth comparing", () => {
+    expect(touchActionOverride("?inktouch=none")).toBe("none");
+    expect(touchActionOverride("?inktouch=pinch-zoom")).toBe("pinch-zoom");
+    expect(touchActionOverride("?inktouch=manipulation")).toBeNull();
+    expect(touchActionOverride("?inktouch=")).toBeNull();
+  });
+});
+
+describe("first-move latency", () => {
+  test("is reported separately from the median it would otherwise hide in", () => {
+    const originalRaf = globalThis.requestAnimationFrame;
+    vi.stubGlobal("requestAnimationFrame", () => 1);
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+
+    const profiler = new InkProfiler(0);
+    profiler.begin(0);
+    // One slow opening event followed by prompt ones -- the shape seen
+    // on device, where a long stroke's median looks healthy while the
+    // start of the gesture is visibly late.
+    const latencies = [38, 2, 2, 2, 2, 2, 2, 2, 2, 2];
+    for (const inputLatency of latencies) {
+      profiler.recordMove({
+        inputLatency,
+        handlerMs: 0,
+        coalesced: 1,
+        pointCount: 1,
+        pathLength: 1,
+      });
+    }
+    const report = profiler.end(1000);
+    expect(report.firstMoveLatency).toBe(38);
+    expect(report.inputLatency.median).toBe(2);
+
+    vi.unstubAllGlobals();
+    globalThis.requestAnimationFrame = originalRaf;
+  });
+
+  test("is zero for a stroke with no moves at all", () => {
+    vi.stubGlobal("requestAnimationFrame", () => 1);
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+    const profiler = new InkProfiler(0);
+    profiler.begin(0);
+    expect(profiler.end(1).firstMoveLatency).toBe(0);
+    vi.unstubAllGlobals();
   });
 });
