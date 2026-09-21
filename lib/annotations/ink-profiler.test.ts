@@ -1,0 +1,107 @@
+import { describe, expect, test, vi } from "vitest";
+import { InkProfiler, formatReport, inkDebugEnabled, summarize } from "./ink-profiler";
+
+describe("summarize", () => {
+  test("returns zeroes for no samples rather than NaN", () => {
+    expect(summarize([])).toEqual({ median: 0, p95: 0, max: 0 });
+  });
+
+  test("reports median, p95 and max from unsorted input", () => {
+    // Even sample count takes the upper median (index 5 of 10) — exact
+    // enough for a diagnostic, and avoids inventing a value that was
+    // never actually measured.
+    const values = [50, 1, 3, 2, 4, 5, 6, 7, 8, 9];
+    const stats = summarize(values);
+    expect(stats.max).toBe(50);
+    expect(stats.median).toBe(6);
+    expect(stats.p95).toBe(50);
+  });
+});
+
+describe("inkDebugEnabled", () => {
+  test("is off by default so normal page loads pay nothing", () => {
+    expect(inkDebugEnabled("")).toBe(false);
+    expect(inkDebugEnabled("?page=3")).toBe(false);
+  });
+
+  test("is on with the explicit opt-in flag", () => {
+    expect(inkDebugEnabled("?inkdebug=1")).toBe(true);
+    expect(inkDebugEnabled("?page=3&inkdebug=1")).toBe(true);
+  });
+});
+
+describe("InkProfiler", () => {
+  function withFakeRaf(frameTimes: number[], run: (flush: () => void) => void) {
+    const callbacks: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+      callbacks.push(cb);
+      return callbacks.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+    run(() => {
+      for (const t of frameTimes) {
+        const cb = callbacks.shift();
+        cb?.(t);
+      }
+    });
+    vi.unstubAllGlobals();
+  }
+
+  test("drops the first gap, which is measured from pointerdown not a prior frame", () => {
+    // Frames at 100, 120, 140: the 100 gap is down->first-frame, and the
+    // real inter-frame intervals are 20 and 20.
+    withFakeRaf([100, 120, 140], (flush) => {
+      const profiler = new InkProfiler(7);
+      profiler.begin(0);
+      flush();
+      const report = profiler.end(140);
+      expect(report.frameCount).toBe(2);
+      expect(report.frameMs.max).toBe(20);
+      expect(report.longFrames).toBe(2);
+    });
+  });
+
+  test("counts coalesced samples toward the true pen sample rate", () => {
+    withFakeRaf([], (flush) => {
+      const profiler = new InkProfiler(0);
+      profiler.begin(0);
+      flush();
+      for (let i = 0; i < 6; i++) {
+        profiler.recordMove({
+          inputLatency: 2,
+          handlerMs: 0.1,
+          coalesced: 3,
+          pointCount: i + 1,
+          pathLength: 10 * (i + 1),
+        });
+      }
+      const report = profiler.end(1000);
+      expect(report.movesPerSecond).toBeCloseTo(6);
+      // 6 dispatches x 3 raw samples each.
+      expect(report.samplesPerSecond).toBeCloseTo(18);
+      expect(report.finalPathLength).toBe(60);
+      expect(report.savedStrokes).toBe(0);
+    });
+  });
+
+  test("times the repaint that follows pointerup", () => {
+    withFakeRaf([100, 120], (flush) => {
+      const profiler = new InkProfiler(0);
+      profiler.begin(0);
+      profiler.markRelease(110);
+      flush();
+      const report = profiler.end(120);
+      // First frame after release lands at 120.
+      expect(report.releaseToPaintMs).toBe(10);
+    });
+  });
+
+  test("formats a report without throwing on an empty stroke", () => {
+    withFakeRaf([], (flush) => {
+      const profiler = new InkProfiler(0);
+      profiler.begin(0);
+      flush();
+      expect(() => formatReport(profiler.end(1))).not.toThrow();
+    });
+  });
+});
