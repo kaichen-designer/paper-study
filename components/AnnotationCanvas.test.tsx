@@ -300,6 +300,42 @@ describe("AnnotationCanvas", () => {
     expect(livePath.getAttribute("d")).toContain("300 220");
   });
 
+  it("draws the browser's predicted points ahead of the pen but never saves them", async () => {
+    const { surface, onStrokeComplete } = setupCanvas();
+
+    fireEvent.pointerDown(surface, { clientX: 80, clientY: 60, pointerType: "pen" });
+    const move = new PointerEvent("pointermove", {
+      clientX: 400,
+      clientY: 300,
+      pointerType: "pen",
+      bubbles: true,
+    });
+    Object.defineProperty(move, "getCoalescedEvents", {
+      value: () => [{ clientX: 400, clientY: 300 }],
+    });
+    Object.defineProperty(move, "getPredictedEvents", {
+      value: () => [{ clientX: 500, clientY: 400 }],
+    });
+    fireEvent(surface, move);
+    await nextFrame();
+
+    const livePath = document.querySelector(
+      '[data-testid="annotation-live-stroke"]'
+    ) as SVGPathElement;
+    // The guess is visible, closing part of the gap to the pen tip.
+    expect(livePath.getAttribute("d")).toContain("500");
+
+    fireEvent.pointerUp(surface, { clientX: 400, clientY: 300, pointerType: "pen" });
+
+    // ...but the saved stroke contains only positions the pen actually
+    // visited: 400/800 and 300/600, never the predicted 500/400.
+    const [[strokes]] = onStrokeComplete.mock.calls;
+    expect(strokes[0].points).toEqual([
+      { x: 0.1, y: 0.1 },
+      { x: 0.5, y: 0.5 },
+    ]);
+  });
+
   it("keeps samples taken in the frame the pen lifts, instead of truncating the stroke", () => {
     const { surface, onStrokeComplete } = setupCanvas();
 

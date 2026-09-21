@@ -1,11 +1,5 @@
 import { describe, expect, test, vi } from "vitest";
-import {
-  InkProfiler,
-  formatReport,
-  inkDebugEnabled,
-  summarize,
-  touchActionOverride,
-} from "./ink-profiler";
+import { InkProfiler, formatReport, inkDebugEnabled, summarize } from "./ink-profiler";
 
 describe("summarize", () => {
   test("returns zeroes for no samples rather than NaN", () => {
@@ -77,6 +71,7 @@ describe("InkProfiler", () => {
           inputLatency: 2,
           handlerMs: 0.1,
           coalesced: 3,
+          predicted: 0,
           pointCount: i + 1,
           pathLength: 10 * (i + 1),
         });
@@ -112,20 +107,6 @@ describe("InkProfiler", () => {
   });
 });
 
-describe("touchActionOverride", () => {
-  test("returns null when absent, so the default stays in the component", () => {
-    expect(touchActionOverride("")).toBeNull();
-    expect(touchActionOverride("?inkdebug=1")).toBeNull();
-  });
-
-  test("accepts only the two values worth comparing", () => {
-    expect(touchActionOverride("?inktouch=none")).toBe("none");
-    expect(touchActionOverride("?inktouch=pinch-zoom")).toBe("pinch-zoom");
-    expect(touchActionOverride("?inktouch=manipulation")).toBeNull();
-    expect(touchActionOverride("?inktouch=")).toBeNull();
-  });
-});
-
 describe("first-move latency", () => {
   test("is reported separately from the median it would otherwise hide in", () => {
     const originalRaf = globalThis.requestAnimationFrame;
@@ -143,6 +124,7 @@ describe("first-move latency", () => {
         inputLatency,
         handlerMs: 0,
         coalesced: 1,
+        predicted: 0,
         pointCount: 1,
         pathLength: 1,
       });
@@ -161,6 +143,38 @@ describe("first-move latency", () => {
     const profiler = new InkProfiler(0);
     profiler.begin(0);
     expect(profiler.end(1).firstMoveLatency).toBe(0);
+    vi.unstubAllGlobals();
+  });
+});
+
+describe("prediction reporting", () => {
+  test("averages predicted points per dispatch, so an absent API reads as zero", () => {
+    vi.stubGlobal("requestAnimationFrame", () => 1);
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+
+    const profiler = new InkProfiler(0);
+    profiler.begin(0);
+    for (const predicted of [4, 2, 0, 2]) {
+      profiler.recordMove({
+        inputLatency: 1,
+        handlerMs: 0,
+        coalesced: 1,
+        predicted,
+        pointCount: 1,
+        pathLength: 1,
+      });
+    }
+    expect(profiler.end(1000).predictedPerMove).toBe(2);
+
+    vi.unstubAllGlobals();
+  });
+
+  test("reports zero rather than NaN when no move was recorded", () => {
+    vi.stubGlobal("requestAnimationFrame", () => 1);
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+    const profiler = new InkProfiler(0);
+    profiler.begin(0);
+    expect(profiler.end(1).predictedPerMove).toBe(0);
     vi.unstubAllGlobals();
   });
 });

@@ -19,6 +19,8 @@ export type MoveSample = {
   handlerMs: number;
   /** How many raw samples the browser had buffered for this dispatch. */
   coalesced: number;
+  /** How many points ahead of the pen the browser was willing to guess. */
+  predicted: number;
   /** Points accumulated in the stroke at this moment. */
   pointCount: number;
   /** Characters in the `d` attribute after this move. */
@@ -50,6 +52,11 @@ export type StrokeReport = {
    * which is exactly why it reads as "the pen is slow to start".
    */
   firstMoveLatency: number;
+  /**
+   * Mean predicted points per dispatch. Zero means the browser offers no
+   * prediction, so the drawn line can never lead the pen tip.
+   */
+  predictedPerMove: number;
 };
 
 export type Stats = { median: number; p95: number; max: number };
@@ -124,6 +131,10 @@ export class InkProfiler {
       frameCount: gaps.length,
       finalPathLength: this.moves.at(-1)?.pathLength ?? 0,
       firstMoveLatency: this.moves[0]?.inputLatency ?? 0,
+      predictedPerMove:
+        this.moves.length === 0
+          ? 0
+          : this.moves.reduce((sum, m) => sum + m.predicted, 0) / this.moves.length,
       savedStrokes: this.savedStrokes,
       releaseToPaintMs: this.releaseToPaint,
     };
@@ -135,18 +146,6 @@ export function inkDebugEnabled(search: string): boolean {
   return new URLSearchParams(search).get("inkdebug") === "1";
 }
 
-/**
- * Lets the drawing surface's `touch-action` be overridden from the URL,
- * so the two candidate values can be compared on one build instead of
- * shipping a guess. `pinch-zoom` (the default) leaves two-finger zoom
- * working but requires WebKit to hold pointer events until it knows the
- * gesture is not a pinch; `none` commits immediately at the cost of that
- * zoom. Only the start of a stroke should differ between them.
- */
-export function touchActionOverride(search: string): "none" | "pinch-zoom" | null {
-  const value = new URLSearchParams(search).get("inktouch");
-  return value === "none" || value === "pinch-zoom" ? value : null;
-}
 
 export function formatReport(r: StrokeReport): string {
   const s = (v: Stats) => `${v.median.toFixed(1)}/${v.p95.toFixed(1)}/${v.max.toFixed(1)}`;
@@ -158,6 +157,7 @@ export function formatReport(r: StrokeReport): string {
     `FRAME interval med/p95/max  ${s(r.frameMs)} ms   <-- stutter`,
     `long frames (>16.7ms) ${r.longFrames}/${r.frameCount}`,
     `release->paint ${r.releaseToPaintMs.toFixed(1)} ms`,
-    `d length ${r.finalPathLength}  saved strokes on page ${r.savedStrokes}`,
+    `predicted ${r.predictedPerMove.toFixed(1)} pts/move   d length ${r.finalPathLength}`,
+    `saved strokes on page ${r.savedStrokes}`,
   ].join("\n");
 }

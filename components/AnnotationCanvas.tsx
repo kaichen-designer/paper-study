@@ -10,12 +10,7 @@ import {
 } from "@/lib/annotations/stroke-geometry";
 import type { Stroke } from "@/lib/annotations/queries";
 import { doesEraserPathIntersectStroke } from "@/lib/annotations/stroke-hit-test";
-import {
-  InkProfiler,
-  inkDebugEnabled,
-  touchActionOverride,
-  type StrokeReport,
-} from "@/lib/annotations/ink-profiler";
+import { InkProfiler, inkDebugEnabled, type StrokeReport } from "@/lib/annotations/ink-profiler";
 
 // Strokes saved before color/width support existed have neither field —
 // render them the same way they always looked, rather than requiring a
@@ -111,8 +106,10 @@ export default function AnnotationCanvas({
   const eraserCursorRef = useRef<SVGCircleElement>(null);
   const [pendingStrokes, setPendingStrokes] = useState<Stroke[]>([]);
   const profilerRef = useRef<InkProfiler | null>(null);
-  const touchAction =
-    (typeof window !== "undefined" && touchActionOverride(window.location.search)) || "pinch-zoom";
+  // Points the browser guesses the pen is about to reach. Rendered at the
+  // end of the live stroke and thrown away on the next frame -- they are
+  // never appended to drawingPointsRef, so nothing speculative is saved.
+  const predictedRef = useRef<Point[]>([]);
 
   // Drop only the pending strokes that have actually appeared in the
   // parent's `strokes` prop — not the whole buffer, since other strokes
@@ -148,7 +145,17 @@ export default function AnnotationCanvas({
     for (const raw of pending) {
       drawingPointsRef.current.push({ x: raw.clientX - rect.left, y: raw.clientY - rect.top });
     }
-    liveStrokeRef.current?.setAttribute("d", smoothPathFromPoints(drawingPointsRef.current));
+    // The predicted tail is drawn but not recorded: it closes part of the
+    // gap between the pen tip and the ink, and is replaced by real
+    // samples on the very next frame. Guessed points must never reach
+    // drawingPointsRef, or a saved stroke would contain positions the pen
+    // never visited.
+    const predicted = predictedRef.current;
+    const toDraw =
+      predicted.length > 0
+        ? [...drawingPointsRef.current, ...predicted]
+        : drawingPointsRef.current;
+    liveStrokeRef.current?.setAttribute("d", smoothPathFromPoints(toDraw));
   }
 
   function scheduleFlush() {
@@ -244,6 +251,7 @@ export default function AnnotationCanvas({
     const handlerStart = profiler ? performance.now() : 0;
     const native = event.nativeEvent as PointerEvent & {
       getCoalescedEvents?: () => PointerEvent[];
+      getPredictedEvents?: () => PointerEvent[];
     };
 
     if (tool === "eraser") {
@@ -262,6 +270,20 @@ export default function AnnotationCanvas({
       for (const sample of batch) {
         pendingRawRef.current.push({ clientX: sample.clientX, clientY: sample.clientY });
       }
+
+      // Where the browser thinks the pen is heading. Drawing this tail is
+      // how a native pen app hides the two frames a touchscreen pipeline
+      // costs; without it the ink can only ever trail the tip.
+      const rect = surfaceRef.current?.getBoundingClientRect();
+      const guesses = native.getPredictedEvents?.() ?? [];
+      predictedRef.current =
+        rect && guesses.length > 0
+          ? guesses.map((guess) => ({
+              x: guess.clientX - rect.left,
+              y: guess.clientY - rect.top,
+            }))
+          : [];
+
       scheduleFlush();
     }
 
@@ -275,6 +297,7 @@ export default function AnnotationCanvas({
         // once-per-frame flush, and shows up in frameMs instead.
         handlerMs: performance.now() - handlerStart,
         coalesced: native.getCoalescedEvents?.().length ?? 1,
+        predicted: predictedRef.current.length,
         pointCount: drawingPointsRef.current.length + pendingRawRef.current.length,
         pathLength: liveStrokeRef.current?.getAttribute("d")?.length ?? 0,
       });
@@ -305,6 +328,7 @@ export default function AnnotationCanvas({
     }
     drawingPointsRef.current = [];
     pendingRawRef.current = [];
+    predictedRef.current = [];
     liveStrokeRef.current?.setAttribute("d", "");
     hideEraserCursor();
 
@@ -350,12 +374,7 @@ export default function AnnotationCanvas({
       onPointerUp={handlePointerUp}
       onPointerCancel={finishDrawing}
       style={{
-        // `pinch-zoom` keeps two-finger zoom available while drawing, at
-        // the cost of WebKit holding the opening pointer events of every
-        // stroke until it can rule out a pinch. ?inktouch= overrides it
-        // so both values can be measured against each other on one
-        // build; see touchActionOverride.
-        touchAction: interactive ? touchAction : "auto",
+        touchAction: interactive ? "pinch-zoom" : "auto",
         pointerEvents: interactive ? "auto" : "none",
       }}
     >
