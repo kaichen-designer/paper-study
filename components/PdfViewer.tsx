@@ -248,6 +248,20 @@ export default function PdfViewer({
               pageNumber={clampPage(currentPage, numPages)}
               width={pageWidth}
               onLoadSuccess={handlePageLoadSuccess}
+              // No text layer while drawing. Refusing selectstart and
+              // setting user-select: none both try to out-argue WebKit's
+              // gesture handling and lose to it somewhere -- a stylus
+              // near existing ink still ends up selecting text, and a
+              // selection left on screen then steals following strokes
+              // via its drag handles. Removing the selectable text
+              // removes the whole class of failure instead of blocking
+              // each route into it.
+              //
+              // Nothing is given up: tap-to-select and selectionchange
+              // already bail out in pen mode, and page text for the
+              // reflection chat comes from page.getTextContent(), which
+              // does not depend on the layer being rendered.
+              renderTextLayer={!penMode}
             />
           </Document>
           {

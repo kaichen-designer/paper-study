@@ -32,9 +32,11 @@ vi.mock("react-pdf", () => ({
     pageNumber,
     width,
     onLoadSuccess,
+    renderTextLayer,
   }: {
     pageNumber: number;
     width?: number;
+    renderTextLayer?: boolean;
     onLoadSuccess?: (page: {
       getTextContent: () => Promise<{ items: { str: string }[] }>;
       getViewport: (params: { scale: number }) => { width: number; height: number };
@@ -47,7 +49,11 @@ vi.mock("react-pdf", () => ({
       getViewport: () => ({ width: 600, height: 800 }),
     });
     return (
-      <div data-testid="page" data-width={width ?? ""}>
+      <div
+        data-testid="page"
+        data-width={width ?? ""}
+        data-text-layer={String(renderTextLayer !== false)}
+      >
         頁面 {pageNumber}
       </div>
     );
@@ -488,5 +494,27 @@ describe("PdfViewer", () => {
     if (hud) {
       expect(hud.closest(".pdf-viewer-page")).toBeNull();
     }
+  });
+
+  it("renders no text layer while drawing, so there is nothing for a stroke to select", () => {
+    render(<PdfViewer fileUrl="/papers/example.pdf" />);
+    expect(screen.getByTestId("page")).toHaveAttribute("data-text-layer", "true");
+
+    fireEvent.click(screen.getByRole("button", { name: /畫筆模式/ }));
+
+    // Refusing selectstart and setting user-select: none both fight
+    // WebKit's gesture handling on its own terms. Removing the selectable
+    // text outright does not.
+    expect(screen.getByTestId("page")).toHaveAttribute("data-text-layer", "false");
+  });
+
+  it("restores the text layer when pen mode is switched off, so translation still works", () => {
+    render(<PdfViewer fileUrl="/papers/example.pdf" />);
+    const toggle = screen.getByRole("button", { name: /畫筆模式/ });
+
+    fireEvent.click(toggle);
+    fireEvent.click(toggle);
+
+    expect(screen.getByTestId("page")).toHaveAttribute("data-text-layer", "true");
   });
 });
