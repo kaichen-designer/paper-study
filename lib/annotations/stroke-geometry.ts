@@ -53,3 +53,38 @@ export function smoothPathFromPoints(points: { x: number; y: number }[]): string
   d += ` L ${last.x} ${last.y}`;
   return d;
 }
+
+// Keyed on the stroke object itself, so a stroke whose identity survives
+// a re-render is never re-serialized. Entries disappear with the stroke,
+// hence WeakMap rather than a Map that would pin every stroke a reader
+// has ever scrolled past.
+const strokePathCache = new WeakMap<object, { width: number; height: number; d: string }>();
+
+/**
+ * Denormalizes a stored stroke to the page's current pixel size and
+ * builds its smoothed path, reusing the previous result when the same
+ * stroke is asked for again at the same size.
+ *
+ * Every saved stroke on the page was otherwise re-serialized on every
+ * React render, including the render caused by finishing an unrelated
+ * stroke -- so the cost of lifting the pen grew with how much was
+ * already drawn on the page.
+ *
+ * Callers MUST treat a stroke as immutable: the cache is keyed on object
+ * identity and will not notice points being mutated in place.
+ */
+export function cachedStrokePath(
+  stroke: { points: { x: number; y: number }[] },
+  pageWidth: number,
+  pageHeight: number
+): string {
+  const cached = strokePathCache.get(stroke);
+  if (cached && cached.width === pageWidth && cached.height === pageHeight) {
+    return cached.d;
+  }
+  const d = smoothPathFromPoints(
+    stroke.points.map((point) => denormalizePoint(point, pageWidth, pageHeight))
+  );
+  strokePathCache.set(stroke, { width: pageWidth, height: pageHeight, d });
+  return d;
+}

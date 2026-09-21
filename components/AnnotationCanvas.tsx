@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
+  cachedStrokePath,
   denormalizePoint,
   normalizePoint,
   smoothPathFromPoints,
@@ -328,7 +329,7 @@ export default function AnnotationCanvas({
   }
 
   function toSmoothPath(stroke: Stroke): string {
-    return smoothPathFromPoints(stroke.points.map((point) => denormalizePoint(point, width, height)));
+    return cachedStrokePath(stroke, width, height);
   }
 
   return (

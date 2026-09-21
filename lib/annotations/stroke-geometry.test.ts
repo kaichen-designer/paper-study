@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { denormalizePoint, normalizePoint, smoothPathFromPoints } from "./stroke-geometry";
+import {
+  cachedStrokePath,
+  denormalizePoint,
+  normalizePoint,
+  smoothPathFromPoints,
+} from "./stroke-geometry";
 
 describe("normalizePoint / denormalizePoint", () => {
   it.each([
@@ -66,5 +71,40 @@ describe("smoothPathFromPoints", () => {
     expect(smoothPathFromPoints(points)).toBe(
       "M 0 0 Q 10 0 15 5 Q 20 10 25 10 L 30 10"
     );
+  });
+});
+
+describe("cachedStrokePath", () => {
+  it("matches an uncached denormalize-then-smooth for the same stroke", () => {
+    const stroke = { points: [{ x: 0.1, y: 0.1 }, { x: 0.5, y: 0.5 }] };
+    const expected = smoothPathFromPoints(
+      stroke.points.map((p) => denormalizePoint(p, 800, 600))
+    );
+    expect(cachedStrokePath(stroke, 800, 600)).toBe(expected);
+  });
+
+  it("reuses the previous result for the same stroke at the same size", () => {
+    const stroke = { points: [{ x: 0.1, y: 0.1 }, { x: 0.5, y: 0.5 }] };
+    const first = cachedStrokePath(stroke, 800, 600);
+    // Mutating in place is exactly what callers are told not to do; the
+    // stale result proves the second call did no work.
+    stroke.points[1] = { x: 0.9, y: 0.9 };
+    expect(cachedStrokePath(stroke, 800, 600)).toBe(first);
+  });
+
+  it("recomputes when the page is rendered at a different size", () => {
+    const stroke = { points: [{ x: 0.1, y: 0.1 }, { x: 0.5, y: 0.5 }] };
+    const atSmall = cachedStrokePath(stroke, 800, 600);
+    const atLarge = cachedStrokePath(stroke, 1600, 1200);
+    expect(atLarge).not.toBe(atSmall);
+    expect(atLarge).toBe(
+      smoothPathFromPoints(stroke.points.map((p) => denormalizePoint(p, 1600, 1200)))
+    );
+  });
+
+  it("keeps separate entries per stroke", () => {
+    const a = { points: [{ x: 0, y: 0 }, { x: 0.5, y: 0.5 }] };
+    const b = { points: [{ x: 0.5, y: 0.5 }, { x: 1, y: 1 }] };
+    expect(cachedStrokePath(a, 800, 600)).not.toBe(cachedStrokePath(b, 800, 600));
   });
 });

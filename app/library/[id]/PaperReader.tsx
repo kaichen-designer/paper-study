@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import PdfViewer from "@/components/PdfViewer";
 import TranslationPanel from "@/components/TranslationPanel";
 import NoteForm from "@/components/NoteForm";
@@ -158,20 +158,29 @@ export default function PaperReader({
     }
   }
 
-  const notesWithStrokesOnCurrentPage = notes.filter(
-    (note) => note.page_number === currentPage && note.strokes
-  );
-  const strokesForCurrentPage = notesWithStrokesOnCurrentPage.flatMap(
-    (note) => note.strokes as Stroke[]
-  );
-  // Parallel to strokesForCurrentPage — index N here is the note that owns
-  // the stroke at index N there, so an eraser's reported index (which only
-  // knows about the flattened AnnotationCanvas array) can be mapped back to
-  // the note record it must delete. See design.md's "One Stroke Per Note
-  // Record" decision: each note holds exactly one stroke in this app.
-  const noteIdsForCurrentPageStrokes = notesWithStrokesOnCurrentPage.flatMap((note) =>
-    (note.strokes as Stroke[]).map(() => note.id)
-  );
+  // Memoized so these arrays keep their identity across renders that did
+  // not touch the notes — this component re-renders for chat messages,
+  // page text and finish-status changes, and a fresh array each time
+  // would defeat the per-stroke path cache in AnnotationCanvas.
+  const { strokesForCurrentPage, noteIdsForCurrentPageStrokes } = useMemo(() => {
+    const notesWithStrokesOnCurrentPage = notes.filter(
+      (note) => note.page_number === currentPage && note.strokes
+    );
+    return {
+      strokesForCurrentPage: notesWithStrokesOnCurrentPage.flatMap(
+        (note) => note.strokes as Stroke[]
+      ),
+      // Parallel to strokesForCurrentPage — index N here is the note that
+      // owns the stroke at index N there, so an eraser's reported index
+      // (which only knows about the flattened AnnotationCanvas array) can
+      // be mapped back to the note record it must delete. See design.md's
+      // "One Stroke Per Note Record" decision: each note holds exactly one
+      // stroke in this app.
+      noteIdsForCurrentPageStrokes: notesWithStrokesOnCurrentPage.flatMap((note) =>
+        (note.strokes as Stroke[]).map(() => note.id)
+      ),
+    };
+  }, [notes, currentPage]);
 
   async function handleEraseStroke(index: number) {
     const noteId = noteIdsForCurrentPageStrokes[index];
