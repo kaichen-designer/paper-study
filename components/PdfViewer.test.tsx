@@ -550,4 +550,44 @@ describe("PdfViewer", () => {
     expect(removeAllRanges).toHaveBeenCalled();
     vi.restoreAllMocks();
   });
+
+  it("refuses selection outside the viewer too, where the translation panel lives", () => {
+    render(<PdfViewer fileUrl="/papers/example.pdf" />);
+    fireEvent.click(screen.getByRole("button", { name: /畫筆模式/ }));
+
+    // Stands in for the translation panel: a sibling of PdfViewer, so
+    // every container-scoped guard missed it.
+    const outsider = document.createElement("p");
+    outsider.textContent = "翻譯";
+    document.body.appendChild(outsider);
+
+    const selectStart = new Event("selectstart", { bubbles: true, cancelable: true });
+    outsider.dispatchEvent(selectStart);
+
+    expect(selectStart.defaultPrevented).toBe(true);
+    outsider.remove();
+  });
+
+  it("marks the document while drawing and unmarks it on exit, so selection returns for translation", () => {
+    render(<PdfViewer fileUrl="/papers/example.pdf" />);
+    const toggle = screen.getByRole("button", { name: /畫筆模式/ });
+
+    expect(document.body.classList.contains("pen-mode-drawing")).toBe(false);
+
+    fireEvent.click(toggle);
+    expect(document.body.classList.contains("pen-mode-drawing")).toBe(true);
+
+    fireEvent.click(toggle);
+    expect(document.body.classList.contains("pen-mode-drawing")).toBe(false);
+  });
+
+  it("stops marking the document when unmounted mid-session, so the class cannot outlive the viewer", () => {
+    const { unmount } = render(<PdfViewer fileUrl="/papers/example.pdf" />);
+    fireEvent.click(screen.getByRole("button", { name: /畫筆模式/ }));
+    expect(document.body.classList.contains("pen-mode-drawing")).toBe(true);
+
+    unmount();
+
+    expect(document.body.classList.contains("pen-mode-drawing")).toBe(false);
+  });
 });

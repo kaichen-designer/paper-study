@@ -15,6 +15,9 @@ import type { PdfDocumentProxy } from "@/lib/pdf/extract-full-text";
 
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
+// Text inputs stay selectable under this; see globals.css.
+const DRAWING_BODY_CLASS = "pen-mode-drawing";
+
 const DEFAULT_ASPECT_RATIO = 1.414; // A4 fallback until the real page loads
 
 export default function PdfViewer({
@@ -66,13 +69,13 @@ export default function PdfViewer({
   // no matter how fast or slow the writing is. Clear it on entering pen
   // mode and again as each stroke begins.
   useEffect(() => {
-    // Bound to the whole viewer, not the page: the toolbar and the debug
-    // HUD are siblings of the page wrapper, and guards scoped to the
-    // page left their labels selectable. A stroke was ending up
-    // selecting the toolbar's own button text, which is also why
-    // removing the PDF text layer changed nothing.
-    const viewer = containerRef.current;
-    if (!viewer || !penMode) return;
+    // Bound to the document, not to any container. Scoping this to the
+    // page left the toolbar selectable; scoping it to the viewer left
+    // the translation panel selectable, which lives outside PdfViewer
+    // entirely. Chasing the selection outward one ancestor at a time was
+    // the wrong shape of fix: pen mode is a mode, not a widget, and
+    // while it is on nothing on screen should be selectable.
+    if (!penMode) return;
 
     const dropSelection = () => {
       const selection = window.getSelection();
@@ -82,13 +85,15 @@ export default function PdfViewer({
     const refuse = (event: Event) => event.preventDefault();
 
     dropSelection();
-    viewer.addEventListener("selectstart", refuse);
+    document.body.classList.add(DRAWING_BODY_CLASS);
+    document.addEventListener("selectstart", refuse);
     // Capture phase: get ahead of anything that would act on a lingering
     // selection before the stroke has a chance to start.
-    viewer.addEventListener("pointerdown", dropSelection, true);
+    document.addEventListener("pointerdown", dropSelection, true);
     return () => {
-      viewer.removeEventListener("selectstart", refuse);
-      viewer.removeEventListener("pointerdown", dropSelection, true);
+      document.body.classList.remove(DRAWING_BODY_CLASS);
+      document.removeEventListener("selectstart", refuse);
+      document.removeEventListener("pointerdown", dropSelection, true);
     };
   }, [penMode]);
   const containerRef = useRef<HTMLDivElement>(null);

@@ -269,19 +269,25 @@ button:disabled {
   -webkit-user-select: none;
 }
 
-/* Belt to the selectstart listener's braces (see PdfViewer): stop
-   anything in the viewer being selectable while drawing, so a stylus
-   drag cannot be reinterpreted as a selection and swallow the stroke.
-   Applied to the whole viewer, not just the page -- the toolbar and the
-   debug HUD sit outside the page wrapper. Scoped to pen mode because
-   selecting text is how translation is invoked. */
-.pdf-viewer.pen-mode-active,
-.pdf-viewer.pen-mode-active *,
-.pdf-viewer-page.pen-mode-active,
-.pdf-viewer-page.pen-mode-active * {
+/* Belt to the selectstart listener's braces (see PdfViewer): while
+   drawing, nothing on screen is selectable, so a stylus drag cannot be
+   reinterpreted as a selection and swallow the stroke. Document-wide on
+   purpose -- scoping it to the page left the toolbar selectable, and
+   scoping it to the viewer left the translation panel selectable. Only
+   while pen mode is on: selecting text is how translation is invoked
+   the rest of the time. */
+body.pen-mode-drawing {
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
+}
+
+/* Typing and editing must keep working while pen mode is on -- the
+   reflection chat and the note form are both on screen at the time. */
+body.pen-mode-drawing input,
+body.pen-mode-drawing textarea {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .pdf-viewer-page.pen-mode-active .react-pdf__Page {
