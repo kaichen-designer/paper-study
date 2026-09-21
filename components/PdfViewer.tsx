@@ -66,8 +66,13 @@ export default function PdfViewer({
   // no matter how fast or slow the writing is. Clear it on entering pen
   // mode and again as each stroke begins.
   useEffect(() => {
-    const wrapper = pageWrapperRef.current;
-    if (!wrapper || !penMode) return;
+    // Bound to the whole viewer, not the page: the toolbar and the debug
+    // HUD are siblings of the page wrapper, and guards scoped to the
+    // page left their labels selectable. A stroke was ending up
+    // selecting the toolbar's own button text, which is also why
+    // removing the PDF text layer changed nothing.
+    const viewer = containerRef.current;
+    if (!viewer || !penMode) return;
 
     const dropSelection = () => {
       const selection = window.getSelection();
@@ -77,13 +82,13 @@ export default function PdfViewer({
     const refuse = (event: Event) => event.preventDefault();
 
     dropSelection();
-    wrapper.addEventListener("selectstart", refuse);
+    viewer.addEventListener("selectstart", refuse);
     // Capture phase: get ahead of anything that would act on a lingering
     // selection before the stroke has a chance to start.
-    wrapper.addEventListener("pointerdown", dropSelection, true);
+    viewer.addEventListener("pointerdown", dropSelection, true);
     return () => {
-      wrapper.removeEventListener("selectstart", refuse);
-      wrapper.removeEventListener("pointerdown", dropSelection, true);
+      viewer.removeEventListener("selectstart", refuse);
+      viewer.removeEventListener("pointerdown", dropSelection, true);
     };
   }, [penMode]);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -228,7 +233,7 @@ export default function PdfViewer({
   }
 
   return (
-    <div className="pdf-viewer" ref={containerRef}>
+    <div className={`pdf-viewer${penMode ? " pen-mode-active" : ""}`} ref={containerRef}>
       <div
         className={`pdf-viewer-page${penMode ? " pen-mode-active" : ""}`}
         ref={pageWrapperRef}

@@ -260,10 +260,23 @@ button:disabled {
   box-shadow: inset 0 0 0 3px #e0a030;
 }
 
-/* Belt to the selectstart listener's braces (see PdfViewer): stop the
-   text layer being selectable at all while drawing, so a stylus drag
-   cannot be reinterpreted as a selection and swallow the stroke. Scoped
-   to pen mode because selecting text is how translation is invoked. */
+/* Button labels are never content to be selected, in any mode. Leaving
+   them selectable let a stroke end up highlighting the toolbar's own
+   text instead of drawing. */
+.annotation-toolbar,
+.annotation-toolbar * {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Belt to the selectstart listener's braces (see PdfViewer): stop
+   anything in the viewer being selectable while drawing, so a stylus
+   drag cannot be reinterpreted as a selection and swallow the stroke.
+   Applied to the whole viewer, not just the page -- the toolbar and the
+   debug HUD sit outside the page wrapper. Scoped to pen mode because
+   selecting text is how translation is invoked. */
+.pdf-viewer.pen-mode-active,
+.pdf-viewer.pen-mode-active *,
 .pdf-viewer-page.pen-mode-active,
 .pdf-viewer-page.pen-mode-active * {
   user-select: none;

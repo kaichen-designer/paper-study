@@ -517,4 +517,37 @@ describe("PdfViewer", () => {
 
     expect(screen.getByTestId("page")).toHaveAttribute("data-text-layer", "true");
   });
+
+  it("refuses selection on the toolbar too, not just the page", () => {
+    render(<PdfViewer fileUrl="/papers/example.pdf" />);
+    fireEvent.click(screen.getByRole("button", { name: /畫筆模式/ }));
+
+    // The toolbar is a sibling of the page wrapper. Guards scoped to the
+    // page left its button labels selectable, and a stroke ended up
+    // highlighting them instead of drawing.
+    const toolbarButton = screen.getByRole("button", { name: "筆刷" });
+    const selectStart = new Event("selectstart", { bubbles: true, cancelable: true });
+    toolbarButton.dispatchEvent(selectStart);
+
+    expect(selectStart.defaultPrevented).toBe(true);
+  });
+
+  it("clears a selection when a stroke starts anywhere in the viewer, including outside the page", () => {
+    const removeAllRanges = vi.fn();
+    vi.spyOn(window, "getSelection").mockReturnValue({
+      isCollapsed: false,
+      removeAllRanges,
+    } as unknown as Selection);
+
+    render(<PdfViewer fileUrl="/papers/example.pdf" />);
+    fireEvent.click(screen.getByRole("button", { name: /畫筆模式/ }));
+    removeAllRanges.mockClear();
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "筆刷" }), {
+      pointerType: "pen",
+    });
+
+    expect(removeAllRanges).toHaveBeenCalled();
+    vi.restoreAllMocks();
+  });
 });
