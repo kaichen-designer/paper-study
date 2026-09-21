@@ -300,6 +300,42 @@ describe("AnnotationCanvas", () => {
     expect(livePath.getAttribute("d")).toContain("300 220");
   });
 
+  it("captures the pointer on the drawing surface, not on whatever stroke lies underneath", () => {
+    const capturedOn: string[] = [];
+    const original = (Element.prototype as unknown as Record<string, unknown>).setPointerCapture;
+    (Element.prototype as unknown as Record<string, unknown>).setPointerCapture = function (
+      this: Element
+    ) {
+      capturedOn.push(this.getAttribute("data-testid") ?? this.tagName);
+    };
+
+    setupCanvas({ strokes: [{ points: [{ x: 0.1, y: 0.1 }, { x: 0.9, y: 0.9 }] }] });
+    // Starting a stroke on top of an existing one is unavoidable on a
+    // page with many annotations, and makes that stroke's <path> the
+    // event target.
+    const existing = document.querySelector("path:not([data-testid])") as SVGPathElement;
+    fireEvent.pointerDown(existing, { clientX: 200, clientY: 150, pointerType: "pen" });
+
+    // Capturing on the <path> would tie the rest of the gesture to a node
+    // that unmounts as soon as the previous stroke's save round-trips,
+    // silently killing the stroke being drawn.
+    expect(capturedOn).toEqual(["annotation-canvas-surface"]);
+
+    (Element.prototype as unknown as Record<string, unknown>).setPointerCapture = original;
+  });
+
+  it("does not let saved or pending strokes take pointer input away from the surface", () => {
+    setupCanvas({ strokes: [{ points: [{ x: 0.1, y: 0.1 }, { x: 0.9, y: 0.9 }] }] });
+
+    const strokePaths = [...document.querySelectorAll("path")].filter(
+      (path) => path.getAttribute("data-testid") !== "annotation-live-stroke"
+    );
+    expect(strokePaths.length).toBeGreaterThan(0);
+    for (const path of strokePaths) {
+      expect(path.style.pointerEvents).toBe("none");
+    }
+  });
+
   it("draws the browser's predicted points ahead of the pen but never saves them", async () => {
     const { surface, onStrokeComplete } = setupCanvas();
 

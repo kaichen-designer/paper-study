@@ -215,14 +215,16 @@ export default function AnnotationCanvas({
     // as a scroll/pan unless the pointerdown itself is also prevented.
     event.preventDefault();
 
-    // Explicitly capture this pointer so every subsequent move/up for THIS
-    // stroke keeps targeting the canvas regardless of what else re-renders
-    // mid-gesture (e.g. the previous stroke's pendingStrokes update) —
-    // without this, writing quickly enough that the next stroke starts
-    // while a re-render from the last one is still in flight could lose
-    // the new stroke's opening events entirely.
+    // Capture on the surface, NOT on event.target. The target is whatever
+    // element the pen happened to land on, which on a page with existing
+    // annotations is usually one of their <path> nodes — and those
+    // unmount as soon as a previous stroke's save round-trips and the
+    // pending buffer is reconciled. Capturing on a node that is about to
+    // disappear hands the rest of the gesture to nobody: the stroke being
+    // drawn right now simply stops, which reads as the canvas randomly
+    // refusing to draw. The surface outlives every stroke.
     try {
-      (event.target as Element).setPointerCapture?.(event.pointerId);
+      surfaceRef.current?.setPointerCapture?.(event.pointerId);
     } catch {
       // Safe to ignore — capture is a reliability improvement, not a
       // requirement; drawing still works without it.
@@ -408,6 +410,11 @@ export default function AnnotationCanvas({
         <path
           key={`saved-${index}`}
           d={toSmoothPath(stroke)}
+          // Ink is not a control. Leaving these hit-testable let them
+          // become the pointerdown target (see handlePointerDown), and
+          // made WebKit test every painted segment on the page against
+          // every pointer event.
+          style={{ pointerEvents: "none" }}
           fill="none"
           stroke={stroke.color ?? DEFAULT_STROKE_COLOR}
           strokeWidth={stroke.width ?? DEFAULT_STROKE_WIDTH}
@@ -420,6 +427,7 @@ export default function AnnotationCanvas({
         <path
           key={`pending-${index}`}
           d={toSmoothPath(stroke)}
+          style={{ pointerEvents: "none" }}
           fill="none"
           stroke={stroke.color ?? DEFAULT_STROKE_COLOR}
           strokeWidth={stroke.width ?? DEFAULT_STROKE_WIDTH}
@@ -432,6 +440,7 @@ export default function AnnotationCanvas({
         ref={liveStrokeRef}
         data-testid="annotation-live-stroke"
         d=""
+        style={{ pointerEvents: "none" }}
         fill="none"
         stroke={strokeColor}
         strokeWidth={strokeWidth}
