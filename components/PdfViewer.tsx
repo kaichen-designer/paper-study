@@ -51,6 +51,20 @@ export default function PdfViewer({
   // Diagnostic only, opt-in via ?inkdebug=1 — see lib/annotations/ink-profiler.ts.
   const [inkReport, setInkReport] = useState<StrokeReport | null>(null);
   const inkDebug = typeof window !== "undefined" && inkDebugEnabled(window.location.search);
+
+  // A stylus drag over the PDF text layer is a text-selection gesture as
+  // far as WebKit is concerned, and it will take the gesture outright:
+  // the stroke never reaches the canvas and text highlights instead.
+  // preventDefault() on pointerdown does not reliably stop this on iOS,
+  // so refuse the selection itself. Only while drawing -- selecting text
+  // is how translation is invoked the rest of the time.
+  useEffect(() => {
+    const wrapper = pageWrapperRef.current;
+    if (!wrapper || !penMode) return;
+    const refuse = (event: Event) => event.preventDefault();
+    wrapper.addEventListener("selectstart", refuse);
+    return () => wrapper.removeEventListener("selectstart", refuse);
+  }, [penMode]);
   const containerRef = useRef<HTMLDivElement>(null);
   const pageWrapperRef = useRef<HTMLDivElement>(null);
 
@@ -283,6 +297,8 @@ export default function PdfViewer({
                 background: "rgba(0,0,0,0.78)",
                 borderRadius: 6,
                 pointerEvents: "none",
+                userSelect: "none",
+                WebkitUserSelect: "none",
                 whiteSpace: "pre",
               }}
             >

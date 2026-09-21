@@ -411,4 +411,25 @@ describe("PdfViewer", () => {
     expect(onTextSelected).not.toHaveBeenCalled();
     getSelectionSpy.mockRestore();
   });
+
+  it("blocks text selection while pen mode is on, so a stylus drag cannot be stolen as a selection gesture", () => {
+    render(<PdfViewer fileUrl="/papers/example.pdf" />);
+    fireEvent.click(screen.getByRole("button", { name: /畫筆模式/ }));
+
+    const page = screen.getByTestId("page").closest(".pdf-viewer-page") as HTMLElement;
+    const selectStart = new Event("selectstart", { bubbles: true, cancelable: true });
+    page.dispatchEvent(selectStart);
+
+    expect(selectStart.defaultPrevented).toBe(true);
+  });
+
+  it("still allows text selection when pen mode is off, since selecting is how translation is invoked", () => {
+    render(<PdfViewer fileUrl="/papers/example.pdf" />);
+
+    const page = screen.getByTestId("page").closest(".pdf-viewer-page") as HTMLElement;
+    const selectStart = new Event("selectstart", { bubbles: true, cancelable: true });
+    page.dispatchEvent(selectStart);
+
+    expect(selectStart.defaultPrevented).toBe(false);
+  });
 });
