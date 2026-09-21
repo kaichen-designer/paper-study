@@ -2,6 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import AnnotationCanvas from "./AnnotationCanvas";
 
+function nextFrame() {
+  return new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+}
+
 function setupCanvas(overrides: Partial<Parameters<typeof AnnotationCanvas>[0]> = {}) {
   const onStrokeComplete = vi.fn();
   const onEraseStroke = vi.fn();
@@ -249,16 +253,70 @@ describe("AnnotationCanvas", () => {
     ).not.toThrow();
   });
 
-  it("updates the in-progress stroke's DOM element directly while drawing, without waiting for a React re-render", () => {
+  it("updates the in-progress stroke's DOM element directly while drawing, without waiting for a React re-render", async () => {
     const { surface } = setupCanvas();
 
     fireEvent.pointerDown(surface, { clientX: 80, clientY: 60, pointerType: "pen" });
     fireEvent.pointerMove(surface, { clientX: 400, clientY: 300, pointerType: "pen" });
+    // The write is batched to one per frame, so it lands on the next
+    // frame rather than inside the event handler. Still a direct DOM
+    // mutation -- no React render has happened in between.
+    await nextFrame();
 
     const livePath = document.querySelector(
       '[data-testid="annotation-live-stroke"]'
     ) as SVGPathElement;
     expect(livePath.getAttribute("d")).toBe("M 80 60 L 400 300");
+  });
+
+  it("draws every coalesced pen sample, not just the one the browser dispatched", async () => {
+    const { surface } = setupCanvas();
+
+    fireEvent.pointerDown(surface, { clientX: 80, clientY: 60, pointerType: "pen" });
+    // One dispatched pointermove carrying the samples the pen took
+    // between frames -- these are the points a 120Hz Pencil produces
+    // that never arrive as their own events.
+    const move = new PointerEvent("pointermove", {
+      clientX: 400,
+      clientY: 300,
+      pointerType: "pen",
+      bubbles: true,
+    });
+    Object.defineProperty(move, "getCoalescedEvents", {
+      value: () => [
+        { clientX: 200, clientY: 150 },
+        { clientX: 300, clientY: 220 },
+        { clientX: 400, clientY: 300 },
+      ],
+    });
+    fireEvent(surface, move);
+    await nextFrame();
+
+    const livePath = document.querySelector(
+      '[data-testid="annotation-live-stroke"]'
+    ) as SVGPathElement;
+    // All three intermediate samples are in the path, not just the last.
+    expect(livePath.getAttribute("d")).toContain("200");
+    expect(livePath.getAttribute("d")).toContain("300 220");
+  });
+
+  it("keeps samples taken in the frame the pen lifts, instead of truncating the stroke", () => {
+    const { surface, onStrokeComplete } = setupCanvas();
+
+    fireEvent.pointerDown(surface, { clientX: 80, clientY: 60, pointerType: "pen" });
+    fireEvent.pointerMove(surface, { clientX: 400, clientY: 300, pointerType: "pen" });
+    // No frame is allowed to run before the release, so the move is only
+    // kept if pointerup flushes it synchronously. Releasing somewhere
+    // else makes the difference observable: without the flush the stroke
+    // would be recorded as down -> release, silently discarding where
+    // the pen actually travelled.
+    fireEvent.pointerUp(surface, { clientX: 640, clientY: 480, pointerType: "pen" });
+
+    expect(onStrokeComplete).toHaveBeenCalledTimes(1);
+    const [[strokes]] = onStrokeComplete.mock.calls;
+    expect(strokes[0].points).toHaveLength(2);
+    // 400/800, 300/600 -- the sampled move, not the 640/480 release.
+    expect(strokes[0].points[1]).toEqual({ x: 0.5, y: 0.5 });
   });
 
   it("keeps the just-finished stroke visible immediately on pointer-up, before the parent's strokes prop has caught up (no disappear/reappear flicker while the save round-trips)", () => {

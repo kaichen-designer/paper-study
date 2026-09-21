@@ -97,6 +97,9 @@ export default function AnnotationCanvas({
   onProfileReport?: (report: StrokeReport) => void;
 }) {
   const drawingPointsRef = useRef<Point[]>([]);
+  // Client coordinates sampled since the last frame, still unconverted.
+  const pendingRawRef = useRef<{ clientX: number; clientY: number }[]>([]);
+  const flushHandleRef = useRef<number | null>(null);
   const surfaceRef = useRef<SVGSVGElement>(null);
   const liveStrokeRef = useRef<SVGPathElement>(null);
   const eraserCursorRef = useRef<SVGCircleElement>(null);
@@ -111,6 +114,39 @@ export default function AnnotationCanvas({
       current.filter((pending) => !strokes.some((saved) => strokesEqual(pending, saved)))
     );
   }, [strokes]);
+
+  useEffect(() => {
+    return () => {
+      if (flushHandleRef.current !== null) cancelAnimationFrame(flushHandleRef.current);
+    };
+  }, []);
+
+  /**
+   * Appends everything sampled since the last frame and rewrites the live
+   * stroke's `d` once. Both halves belong here rather than in the event
+   * handler: reading the surface rect forces a style/layout flush, and a
+   * pen dispatching several coalesced batches per frame would otherwise
+   * pay for both the layout and a full path rebuild on every one of them,
+   * only for all but the last result to be overwritten before anything is
+   * painted.
+   */
+  function flushLiveStroke() {
+    flushHandleRef.current = null;
+    const pending = pendingRawRef.current;
+    if (pending.length === 0) return;
+    pendingRawRef.current = [];
+    const rect = surfaceRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    for (const raw of pending) {
+      drawingPointsRef.current.push({ x: raw.clientX - rect.left, y: raw.clientY - rect.top });
+    }
+    liveStrokeRef.current?.setAttribute("d", smoothPathFromPoints(drawingPointsRef.current));
+  }
+
+  function scheduleFlush() {
+    if (flushHandleRef.current !== null) return;
+    flushHandleRef.current = requestAnimationFrame(flushLiveStroke);
+  }
 
   function toLocalPoint(event: { clientX: number; clientY: number }): Point {
     const rect = surfaceRef.current!.getBoundingClientRect();
@@ -197,30 +233,55 @@ export default function AnnotationCanvas({
     event.preventDefault();
 
     const profiler = profilerRef.current;
-    if (!profiler) {
+    const handlerStart = profiler ? performance.now() : 0;
+    const native = event.nativeEvent as PointerEvent & {
+      getCoalescedEvents?: () => PointerEvent[];
+    };
+
+    if (tool === "eraser") {
+      // Left synchronous and uncoalesced on purpose: erasing is already
+      // smooth, and the hit test wants the pointer's current position,
+      // not a replay of every sample leading up to it.
       recordPoint(toLocalPoint(event));
-      return;
+    } else {
+      // Apple Pencil samples at 120-240Hz, but pointermove is dispatched
+      // at most once per frame and the samples in between are reachable
+      // only through getCoalescedEvents -- ignoring it throws away more
+      // than half the pen's resolution, which is what makes quick
+      // handwriting come out angular.
+      const coalesced = native.getCoalescedEvents?.() ?? [];
+      const batch = coalesced.length > 0 ? coalesced : [event];
+      for (const sample of batch) {
+        pendingRawRef.current.push({ clientX: sample.clientX, clientY: sample.clientY });
+      }
+      scheduleFlush();
     }
 
-    const handlerStart = performance.now();
-    recordPoint(toLocalPoint(event));
-    const handlerEnd = performance.now();
-    const native = event.nativeEvent as PointerEvent & {
-      getCoalescedEvents?: () => unknown[];
-    };
-    profiler.recordMove({
-      // event.timeStamp shares performance.now()'''s origin in every browser
-      // that matters here, so the difference is how long the event sat
-      // before our handler ran.
-      inputLatency: handlerStart - event.timeStamp,
-      handlerMs: handlerEnd - handlerStart,
-      coalesced: native.getCoalescedEvents?.().length ?? 1,
-      pointCount: drawingPointsRef.current.length,
-      pathLength: liveStrokeRef.current?.getAttribute("d")?.length ?? 0,
-    });
+    if (profiler) {
+      profiler.recordMove({
+        // event.timeStamp shares performance.now()'s origin in every
+        // browser that matters here, so the difference is how long the
+        // event sat before our handler ran.
+        inputLatency: handlerStart - event.timeStamp,
+        // Sampling only -- the path rebuild now happens in the
+        // once-per-frame flush, and shows up in frameMs instead.
+        handlerMs: performance.now() - handlerStart,
+        coalesced: native.getCoalescedEvents?.().length ?? 1,
+        pointCount: drawingPointsRef.current.length + pendingRawRef.current.length,
+        pathLength: liveStrokeRef.current?.getAttribute("d")?.length ?? 0,
+      });
+    }
   }
 
   function finishDrawing() {
+    if (flushHandleRef.current !== null) {
+      cancelAnimationFrame(flushHandleRef.current);
+      flushHandleRef.current = null;
+    }
+    // Samples taken during the current frame have not been appended yet,
+    // and dropping them would shorten every stroke by up to one frame.
+    flushLiveStroke();
+
     if ((tool === "pen" || tool === "highlighter") && hasMeaningfulMovement(drawingPointsRef.current)) {
       const normalized = drawingPointsRef.current.map((point) =>
         normalizePoint(point, width, height)
@@ -235,6 +296,7 @@ export default function AnnotationCanvas({
       onStrokeComplete([stroke]);
     }
     drawingPointsRef.current = [];
+    pendingRawRef.current = [];
     liveStrokeRef.current?.setAttribute("d", "");
     hideEraserCursor();
 
@@ -258,6 +320,7 @@ export default function AnnotationCanvas({
     // so it isn't discarded outright for having just a single point.
     // When pointermove already ran, its last position is where the finger/
     // pencil actually was, so there's nothing new to add here.
+    flushLiveStroke();
     if (drawingPointsRef.current.length === 1) {
       recordPoint(toLocalPoint(event));
     }
