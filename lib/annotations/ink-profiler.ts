@@ -184,10 +184,24 @@ export type InkTally = {
   endedByCancel: number;
   discarded: number;
   touchWhileDrawing: number;
+  /**
+   * React renders that landed while a stroke was in progress. Saving a
+   * stroke round-trips to the server and comes back mid-way through the
+   * NEXT stroke, re-rendering every stroke already on the page -- work
+   * that grows with page density and lands squarely on the frame budget.
+   */
+  rendersDuringStroke: number;
 };
 
 export function emptyTally(): InkTally {
-  return { started: 0, endedByUp: 0, endedByCancel: 0, discarded: 0, touchWhileDrawing: 0 };
+  return {
+    started: 0,
+    endedByUp: 0,
+    endedByCancel: 0,
+    discarded: 0,
+    touchWhileDrawing: 0,
+    rendersDuringStroke: 0,
+  };
 }
 
 export function formatTally(t: InkTally): string {
@@ -195,5 +209,6 @@ export function formatTally(t: InkTally): string {
   return [
     `strokes ${t.started}  ended-up ${t.endedByUp}  CANCELLED ${t.endedByCancel}  discarded ${t.discarded}`,
     `touches during strokes ${t.touchWhileDrawing}   unaccounted ${lost - t.endedByCancel}`,
+    `RENDERS during strokes ${t.rendersDuringStroke}`,
   ].join("\n");
 }

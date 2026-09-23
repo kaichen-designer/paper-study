@@ -136,6 +136,25 @@ export default function AnnotationCanvas({
     onTally?.(tallyRef.current);
   }
 
+  // Saving a stroke round-trips to the server, and the result lands
+  // part-way through the NEXT stroke. Rendering it immediately re-renders
+  // every stroke already on the page, in the middle of a gesture, with a
+  // cost that grows as the page fills -- so the ink held here is only
+  // brought up to date once the pen is off the page.
+  const [settledStrokes, setSettledStrokes] = useState(strokes);
+  const latestStrokesRef = useRef(strokes);
+  latestStrokesRef.current = strokes;
+
+  useEffect(() => {
+    if (drawingPointsRef.current.length === 0) setSettledStrokes(strokes);
+  }, [strokes]);
+
+  // Counts renders that land mid-stroke; no dep array, so it runs after
+  // every one.
+  useEffect(() => {
+    if (drawingPointsRef.current.length > 0) bumpTally("rendersDuringStroke");
+  });
+
   // Drop only the pending strokes that have actually appeared in the
   // parent's `strokes` prop — not the whole buffer, since other strokes
   // drawn in quick succession may still be mid-save.
@@ -452,6 +471,10 @@ export default function AnnotationCanvas({
     settledIndexRef.current = 1;
     settledEndRef.current = null;
     clearLiveCanvas();
+
+    // Pen is off the page: safe to take on whatever arrived while it was
+    // down, now that doing so cannot cost a frame mid-gesture.
+    setSettledStrokes(latestStrokesRef.current);
     liveStrokeRef.current?.setAttribute("d", "");
     hideEraserCursor();
 
@@ -503,7 +526,7 @@ export default function AnnotationCanvas({
         height={height}
         style={{ position: "absolute", top: 0, left: 0, pointerEvents: "none" }}
       >
-        {strokes.map((stroke, index) => (
+        {settledStrokes.map((stroke, index) => (
           <path
             key={`saved-${index}`}
             d={toSmoothPath(stroke)}
@@ -572,7 +595,7 @@ export default function AnnotationCanvas({
         // Keep this layer off the saved layer's raster while drawing, so
         // a live update never drags the saved ink through a repaint.
         transform: "translateZ(0)",
-        willChange: interactive ? "contents" : "auto",
+        willChange: interactive ? "transform" : "auto",
       }}
     >
       {/*

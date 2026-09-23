@@ -727,4 +727,36 @@ describe("AnnotationCanvas", () => {
 
     vi.restoreAllMocks();
   });
+
+  it("does not re-render saved ink while a stroke is in progress", () => {
+    const { surface, rerenderWith } = setupCanvas();
+
+    fireEvent.pointerDown(surface, { clientX: 10, clientY: 10, pointerType: "pen" });
+
+    const savedLayer = screen.getByTestId("annotation-saved-layer");
+    expect(savedLayer.querySelectorAll("path")).toHaveLength(0);
+
+    // An earlier stroke's save lands while the pen is still down. Taking
+    // it on now would re-render every stroke on the page mid-gesture,
+    // and that cost grows as the page fills.
+    rerenderWith({ strokes: [{ points: [{ x: 0.1, y: 0.1 }, { x: 0.5, y: 0.5 }] }] });
+
+    expect(savedLayer.querySelectorAll("path")).toHaveLength(0);
+  });
+
+  it("takes on ink that arrived mid-stroke once the pen lifts", () => {
+    const { surface, rerenderWith } = setupCanvas();
+
+    fireEvent.pointerDown(surface, { clientX: 10, clientY: 10, pointerType: "pen" });
+    rerenderWith({ strokes: [{ points: [{ x: 0.1, y: 0.1 }, { x: 0.5, y: 0.5 }] }] });
+    fireEvent.pointerUp(surface, { clientX: 20, clientY: 20, pointerType: "pen" });
+
+    // Deferred, not dropped. The lift also leaves this gesture's own
+    // optimistic mark behind, so look for the deferred stroke itself
+    // rather than counting paths.
+    const drawn = [...screen.getByTestId("annotation-saved-layer").querySelectorAll("path")].map(
+      (path) => path.getAttribute("d")
+    );
+    expect(drawn).toContain("M 80 60 L 400 300");
+  });
 });
