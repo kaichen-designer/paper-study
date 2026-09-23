@@ -192,6 +192,12 @@ export type InkTally = {
    */
   rendersDuringStroke: number;
   /**
+   * Strokes handed to the parent to save. Compared against ended-up,
+   * this separates a stroke that died inside the canvas from one that
+   * died on its way to the server.
+   */
+  submitted: number;
+  /**
    * Which props differed on the last render that landed mid-stroke.
    * "(same props)" means the parent re-rendered for its own reasons and
    * nothing downstream stopped it -- a memo problem, not a data problem.
@@ -207,6 +213,7 @@ export function emptyTally(): InkTally {
     discarded: 0,
     touchWhileDrawing: 0,
     rendersDuringStroke: 0,
+    submitted: 0,
     lastRenderCause: "",
   };
 }
@@ -214,7 +221,7 @@ export function emptyTally(): InkTally {
 export function formatTally(t: InkTally): string {
   const lost = t.started - t.endedByUp;
   return [
-    `strokes ${t.started}  ended-up ${t.endedByUp}  CANCELLED ${t.endedByCancel}  discarded ${t.discarded}`,
+    `strokes ${t.started}  ended-up ${t.endedByUp}  submitted ${t.submitted}  CANCELLED ${t.endedByCancel}  discarded ${t.discarded}`,
     `touches during strokes ${t.touchWhileDrawing}   unaccounted ${lost - t.endedByCancel}`,
     `RENDERS during strokes ${t.rendersDuringStroke}  <- ${t.lastRenderCause || "n/a"}`,
   ].join("\n");

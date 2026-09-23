@@ -207,6 +207,60 @@ describe("PaperReader", () => {
     );
   });
 
+  it("retries a failed stroke save once, so a brief network drop does not cost the stroke", async () => {
+    createStrokeNoteMock.mockClear();
+    createStrokeNoteMock.mockRejectedValueOnce(new Error("network"));
+    createStrokeNoteMock.mockResolvedValueOnce({
+      id: "n9",
+      paper_id: "p1",
+      user_id: "u1",
+      page_number: 1,
+      position: null,
+      selected_text: null,
+      note_text: null,
+      strokes: [{ points: [{ x: 0.1, y: 0.1 }] }],
+      created_at: "2026-08-31T00:00:00.000Z",
+    });
+
+    render(<PaperReader fileUrl="/x.pdf" paperId="p1" initialNotes={[]} />);
+    fireEvent.click(screen.getByText("simulate-stroke-complete"));
+
+    await waitFor(() => expect(createStrokeNoteMock).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(screen.getByTestId("strokes-for-current-page")).toHaveTextContent(
+        JSON.stringify([{ points: [{ x: 0.1, y: 0.1 }] }])
+      )
+    );
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("says so when a stroke cannot be saved, instead of losing it silently", async () => {
+    createStrokeNoteMock.mockClear();
+    createStrokeNoteMock.mockRejectedValue(new Error("network"));
+
+    render(<PaperReader fileUrl="/x.pdf" paperId="p1" initialNotes={[]} />);
+    fireEvent.click(screen.getByText("simulate-stroke-complete"));
+
+    // The ink stays on screen either way, so without this the loss is
+    // invisible until a reload quietly removes it -- which reads as the
+    // pen having failed rather than the save.
+    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+    expect(createStrokeNoteMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not leave a rejected save unhandled, which is how strokes disappeared without a trace", async () => {
+    const unhandled = vi.fn();
+    process.on("unhandledRejection", unhandled);
+    createStrokeNoteMock.mockRejectedValue(new Error("network"));
+
+    render(<PaperReader fileUrl="/x.pdf" paperId="p1" initialNotes={[]} />);
+    fireEvent.click(screen.getByText("simulate-stroke-complete"));
+    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+
+    expect(unhandled).not.toHaveBeenCalled();
+    process.off("unhandledRejection", unhandled);
+  });
+
   it("saves a stroke's color/width via createStrokeNote exactly as reported by PdfViewer, without stripping them", async () => {
     createStrokeNoteMock.mockResolvedValue({
       id: "n5",

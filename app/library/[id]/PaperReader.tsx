@@ -39,6 +39,7 @@ export default function PaperReader({
   );
   const [reachedLastPage, setReachedLastPage] = useState(initialReachedLastPage);
   const [finishedReading, setFinishedReading] = useState(initialFinishedReading);
+  const [strokeSaveFailed, setStrokeSaveFailed] = useState(false);
   const [importedToDetabase] = useState(initialImportedToDetabase);
   const [finishStatus, setFinishStatus] = useState<
     { kind: "idle" } | { kind: "error"; message: string }
@@ -73,14 +74,38 @@ export default function PaperReader({
   const handleStrokeComplete = useCallback(
     async (strokes: Stroke[]) => {
       const supabase = getSupabaseBrowserClient();
-      const note = await createStrokeNote(supabase, {
-        paperId,
-        pageNumber: currentPage,
-        strokes,
-      });
-      if (note) {
-        setNotes((current) => [...current, note as Note]);
+
+      // createStrokeNote throws on failure, and this is called without
+      // await or catch, so a rejection used to become an unhandled
+      // promise rejection: the stroke was dropped with no retry, no
+      // message, and no trace. It stayed on screen from the optimistic
+      // copy and then vanished on reload, which is indistinguishable
+      // from the pen never having worked.
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const note = await createStrokeNote(supabase, {
+            paperId,
+            pageNumber: currentPage,
+            strokes,
+          });
+          if (note) {
+            setNotes((current) => [...current, note as Note]);
+          }
+          setStrokeSaveFailed(false);
+          return;
+        } catch {
+          // One retry covers the common case: a brief network drop or a
+          // token refresh in flight.
+          if (attempt === 0) {
+            await new Promise((resolve) => setTimeout(resolve, 400));
+          }
+        }
       }
+
+      // Out of attempts. The ink is still on screen but exists only in
+      // memory now, so say so rather than letting it disappear silently
+      // at the next reload.
+      setStrokeSaveFailed(true);
     },
     [paperId, currentPage]
   );
@@ -210,6 +235,11 @@ export default function PaperReader({
 
   return (
     <div>
+      {strokeSaveFailed && (
+        <p role="alert" className="stroke-save-error">
+          有筆跡沒有存起來，重新整理後會消失。請檢查網路連線，這一筆需要重畫。
+        </p>
+      )}
       <div className="paper-reader">
         <PdfViewer
           fileUrl={fileUrl}

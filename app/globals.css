@@ -472,3 +472,15 @@ body.pen-mode-drawing textarea {
   font-size: 0.85rem;
   margin-bottom: 0.25rem;
 }
+
+/* Saving a stroke can fail after its retry, and the ink stays on screen
+   either way -- so without this the loss is invisible until a reload
+   silently removes it. */
+.stroke-save-error {
+  margin: 0 0 0.75rem;
+  padding: 0.6rem 0.9rem;
+  border-radius: var(--radius-card);
+  background: #4a1d1d;
+  color: #ffd9d9;
+  font-size: 0.9rem;
+}
