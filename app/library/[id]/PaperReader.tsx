@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import PdfViewer from "@/components/PdfViewer";
 import TranslationPanel from "@/components/TranslationPanel";
 import NoteForm from "@/components/NoteForm";
@@ -66,17 +66,24 @@ export default function PaperReader({
     setNotes((current) => [...current, note]);
   }
 
-  async function handleStrokeComplete(strokes: Stroke[]) {
-    const supabase = getSupabaseBrowserClient();
-    const note = await createStrokeNote(supabase, {
-      paperId,
-      pageNumber: currentPage,
-      strokes,
-    });
-    if (note) {
-      setNotes((current) => [...current, note as Note]);
-    }
-  }
+  // Stable identity: this is handed down to the memoized AnnotationCanvas,
+  // and a new function each render would re-render every stroke on the
+  // page whenever anything else here changes -- chat messages, page text,
+  // finish status.
+  const handleStrokeComplete = useCallback(
+    async (strokes: Stroke[]) => {
+      const supabase = getSupabaseBrowserClient();
+      const note = await createStrokeNote(supabase, {
+        paperId,
+        pageNumber: currentPage,
+        strokes,
+      });
+      if (note) {
+        setNotes((current) => [...current, note as Note]);
+      }
+    },
+    [paperId, currentPage]
+  );
 
   async function handleReachedLastPage() {
     if (reachedLastPage) return;
@@ -182,20 +189,24 @@ export default function PaperReader({
     };
   }, [notes, currentPage]);
 
-  async function handleEraseStroke(index: number) {
-    const noteId = noteIdsForCurrentPageStrokes[index];
-    if (!noteId) return;
+  // Stable identity for the same reason as handleStrokeComplete.
+  const handleEraseStroke = useCallback(
+    async (index: number) => {
+      const noteId = noteIdsForCurrentPageStrokes[index];
+      if (!noteId) return;
 
-    const supabase = getSupabaseBrowserClient();
-    try {
-      await deleteStrokeNote(supabase, noteId);
-    } catch {
-      // Keep the stroke visible rather than removing it optimistically —
-      // see design.md's failure-mode decision for deleteStrokeNote.
-      return;
-    }
-    setNotes((current) => current.filter((note) => note.id !== noteId));
-  }
+      const supabase = getSupabaseBrowserClient();
+      try {
+        await deleteStrokeNote(supabase, noteId);
+      } catch {
+        // Keep the stroke visible rather than removing it optimistically —
+        // see design.md's failure-mode decision for deleteStrokeNote.
+        return;
+      }
+      setNotes((current) => current.filter((note) => note.id !== noteId));
+    },
+    [noteIdsForCurrentPageStrokes]
+  );
 
   return (
     <div>

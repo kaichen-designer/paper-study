@@ -191,6 +191,12 @@ export type InkTally = {
    * that grows with page density and lands squarely on the frame budget.
    */
   rendersDuringStroke: number;
+  /**
+   * Which props differed on the last render that landed mid-stroke.
+   * "(same props)" means the parent re-rendered for its own reasons and
+   * nothing downstream stopped it -- a memo problem, not a data problem.
+   */
+  lastRenderCause: string;
 };
 
 export function emptyTally(): InkTally {
@@ -201,6 +207,7 @@ export function emptyTally(): InkTally {
     discarded: 0,
     touchWhileDrawing: 0,
     rendersDuringStroke: 0,
+    lastRenderCause: "",
   };
 }
 
@@ -209,6 +216,6 @@ export function formatTally(t: InkTally): string {
   return [
     `strokes ${t.started}  ended-up ${t.endedByUp}  CANCELLED ${t.endedByCancel}  discarded ${t.discarded}`,
     `touches during strokes ${t.touchWhileDrawing}   unaccounted ${lost - t.endedByCancel}`,
-    `RENDERS during strokes ${t.rendersDuringStroke}`,
+    `RENDERS during strokes ${t.rendersDuringStroke}  <- ${t.lastRenderCause || "n/a"}`,
   ].join("\n");
 }

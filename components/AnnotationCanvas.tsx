@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import {
   cachedStrokePath,
   denormalizePoint,
@@ -84,7 +84,7 @@ function strokesEqual(a: Stroke, b: Stroke): boolean {
  * appeared in `strokes` — clearing the whole buffer on any props change
  * would also wipe out sibling strokes still mid-save.
  */
-export default function AnnotationCanvas({
+function AnnotationCanvas({
   width,
   height,
   strokes,
@@ -138,7 +138,11 @@ export default function AnnotationCanvas({
    * first version of the render counter did exactly that and measured
    * itself, at roughly 1600 renders per stroke.
    */
-  function bumpTally(field: keyof InkTally, notify = true) {
+  type CountedField = {
+    [K in keyof InkTally]: InkTally[K] extends number ? K : never;
+  }[keyof InkTally];
+
+  function bumpTally(field: CountedField, notify = true) {
     tallyRef.current = { ...tallyRef.current, [field]: tallyRef.current[field] + 1 };
     if (notify) onTally?.(tallyRef.current);
   }
@@ -156,11 +160,33 @@ export default function AnnotationCanvas({
     if (drawingPointsRef.current.length === 0) setSettledStrokes(strokes);
   }, [strokes]);
 
-  // Counts renders that land mid-stroke; no dep array, so it runs after
-  // every one. Must not notify -- see bumpTally. The accumulated count
-  // reaches the parent when the stroke ends.
+  // Counts renders that land mid-stroke and records what differed, so
+  // the cause is named instead of guessed. No dep array, so it runs
+  // after every render. Must not notify -- see bumpTally.
+  const previousPropsRef = useRef<Record<string, unknown>>({});
   useEffect(() => {
-    if (drawingPointsRef.current.length > 0) bumpTally("rendersDuringStroke", false);
+    const current: Record<string, unknown> = {
+      width,
+      height,
+      strokes,
+      strokeColor,
+      strokeWidth,
+      tool,
+      interactive,
+      onStrokeComplete,
+      onEraseStroke,
+    };
+    if (drawingPointsRef.current.length > 0) {
+      const changed = Object.keys(current).filter(
+        (key) => current[key] !== previousPropsRef.current[key]
+      );
+      tallyRef.current = {
+        ...tallyRef.current,
+        rendersDuringStroke: tallyRef.current.rendersDuringStroke + 1,
+        lastRenderCause: changed.length > 0 ? changed.join(",") : "(same props)",
+      };
+    }
+    previousPropsRef.current = current;
   });
 
   // Drop only the pending strokes that have actually appeared in the
@@ -263,9 +289,13 @@ export default function AnnotationCanvas({
     const ratio = window.devicePixelRatio || 1;
     const pixelWidth = Math.round(width * ratio);
     const pixelHeight = Math.round(height * ratio);
-    // Assigning either dimension clears the canvas, so only do it when
-    // the size actually changed -- never mid-stroke at a stable size.
-    if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+    // Assigning either dimension CLEARS the canvas. The page's measured
+    // size can change under a parent re-render, and doing that mid-stroke
+    // wipes the ink drawn so far, leaving only the two-point SVG tail --
+    // the stroke visibly vanishes while it is being drawn. Never resize
+    // while the pen is down; the next stroke picks up the new size.
+    const drawing = drawingPointsRef.current.length > 0;
+    if (!drawing && (canvas.width !== pixelWidth || canvas.height !== pixelHeight)) {
       canvas.width = pixelWidth;
       canvas.height = pixelHeight;
     }
@@ -670,3 +700,12 @@ export default function AnnotationCanvas({
     </div>
   );
 }
+
+/**
+ * Memoized because the saved-ink layer holds one <path> per stroke on the
+ * page, and a parent re-render would otherwise rebuild all of them --
+ * mid-gesture, with a cost that grows as the page fills. The parent
+ * re-renders for reasons of its own (saves landing, page text, chat), so
+ * this component has to stop them here rather than rely on them stopping.
+ */
+export default memo(AnnotationCanvas);

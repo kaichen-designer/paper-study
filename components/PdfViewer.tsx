@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
@@ -23,6 +23,10 @@ pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/b
 
 // Text inputs stay selectable under this; see globals.css.
 const DRAWING_BODY_CLASS = "pen-mode-drawing";
+
+// A fresh [] on every render would defeat AnnotationCanvas's memo, which
+// is the whole reason the memo exists.
+const NO_STROKES: Stroke[] = [];
 
 const DEFAULT_ASPECT_RATIO = 1.414; // A4 fallback until the real page loads
 
@@ -61,6 +65,18 @@ export default function PdfViewer({
   const [inkReport, setInkReport] = useState<StrokeReport | null>(null);
   const [inkTally, setInkTally] = useState<InkTally | null>(null);
   const inkDebug = typeof window !== "undefined" && inkDebugEnabled(window.location.search);
+
+  // Inline arrow props are a new function on every render, which would
+  // make AnnotationCanvas re-render -- and rebuild one <path> per stroke
+  // on the page -- every time this component renders for any reason.
+  const handleStrokeComplete = useCallback(
+    (newStrokes: Stroke[]) => onStrokeComplete?.(newStrokes),
+    [onStrokeComplete]
+  );
+  const handleEraseStroke = useCallback(
+    (index: number) => onEraseStroke?.(index),
+    [onEraseStroke]
+  );
 
   // A stylus drag over the PDF text layer is a text-selection gesture as
   // far as WebKit is concerned, and it will take the gesture outright:
@@ -324,12 +340,12 @@ export default function PdfViewer({
             <AnnotationCanvas
               width={effectivePageWidth}
               height={pageHeight}
-              strokes={strokes ?? []}
-              onStrokeComplete={(newStrokes) => onStrokeComplete?.(newStrokes)}
+              strokes={strokes ?? NO_STROKES}
+              onStrokeComplete={handleStrokeComplete}
               strokeColor={strokeColor}
               strokeWidth={strokeWidth}
               tool={tool}
-              onEraseStroke={(index) => onEraseStroke?.(index)}
+              onEraseStroke={handleEraseStroke}
               interactive={penMode}
               onProfileReport={inkDebug ? setInkReport : undefined}
               onTally={inkDebug ? setInkTally : undefined}

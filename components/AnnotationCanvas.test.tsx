@@ -779,4 +779,33 @@ describe("AnnotationCanvas", () => {
     fireEvent.pointerUp(surface, { clientX: 20, clientY: 20, pointerType: "pen" });
     expect(onTally.mock.calls.at(-1)![0].rendersDuringStroke).toBeGreaterThan(0);
   });
+
+  it("does not resize the canvas mid-stroke, which would wipe the ink being drawn", async () => {
+    const { calls } = stubCanvas();
+    const { surface, rerenderWith } = setupCanvas();
+
+    fireEvent.pointerDown(surface, { clientX: 0, clientY: 0, pointerType: "pen" });
+    penMove(surface, 100, 0);
+    penMove(surface, 200, 0);
+    await nextFrame();
+
+    const canvas = screen.getByTestId("annotation-live-canvas") as HTMLCanvasElement;
+    const widthBefore = canvas.width;
+    calls.length = 0;
+
+    // The measured page size changes under a parent re-render while the
+    // pen is still down. Assigning canvas.width clears the canvas, so
+    // taking this on now would erase the stroke in progress and leave
+    // only the two-point SVG tail.
+    rerenderWith({ width: 900 });
+    penMove(surface, 300, 0);
+    await nextFrame();
+
+    expect(canvas.width).toBe(widthBefore);
+    expect(calls.some((call) => call.op === "clearRect")).toBe(false);
+    // Still drawing, not stalled.
+    expect(calls.some((call) => call.op === "quadraticCurveTo")).toBe(true);
+
+    vi.restoreAllMocks();
+  });
 });
