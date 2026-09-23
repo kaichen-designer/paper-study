@@ -14,6 +14,7 @@ import {
   InkProfiler,
   emptyTally,
   inkDebugEnabled,
+  touchActionOverride,
   type InkTally,
   type StrokeReport,
 } from "@/lib/annotations/ink-profiler";
@@ -124,6 +125,9 @@ function AnnotationCanvas({
   // never appended to drawingPointsRef, so nothing speculative is saved.
   const predictedRef = useRef<Point[]>([]);
   const tallyRef = useRef<InkTally>(emptyTally());
+  // Default unchanged until the override proves it is worth the zoom.
+  const touchAction =
+    (typeof window !== "undefined" && touchActionOverride(window.location.search)) || "pinch-zoom";
   // One canvas holds everything: saved ink and the stroke currently
   // being drawn. Two full-page canvases meant two full-page textures
   // stacked over the PDF, one of them re-uploaded every frame -- which
@@ -625,7 +629,7 @@ function AnnotationCanvas({
         position: "absolute",
         top: 0,
         left: 0,
-        touchAction: interactive ? "pinch-zoom" : "auto",
+        touchAction: interactive ? touchAction : "auto",
         pointerEvents: interactive ? "auto" : "none",
       }}
     >

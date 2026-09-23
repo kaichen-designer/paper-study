@@ -147,6 +147,21 @@ export function inkDebugEnabled(search: string): boolean {
 }
 
 
+/**
+ * Overrides the drawing surface's `touch-action` from the URL.
+ *
+ * Re-added deliberately. This was tried before and dropped because it
+ * did not change first-move latency -- but latency was the wrong thing
+ * to measure. The question now is whether a contact is DISCARDED, and
+ * `pinch-zoom` requires WebKit to hold a gesture until it can rule out a
+ * pinch, which a hard, short, fast jab can end before. `none` commits
+ * immediately, at the cost of two-finger zoom while drawing.
+ */
+export function touchActionOverride(search: string): "none" | "pinch-zoom" | null {
+  const value = new URLSearchParams(search).get("inktouch");
+  return value === "none" || value === "pinch-zoom" ? value : null;
+}
+
 export function formatReport(r: StrokeReport): string {
   const s = (v: Stats) => `${v.median.toFixed(1)}/${v.p95.toFixed(1)}/${v.max.toFixed(1)}`;
   return [
