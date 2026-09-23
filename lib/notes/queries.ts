@@ -75,19 +75,36 @@ export async function createNote(
  * `notes_select_own` RLS policy in schema.sql, same pattern as
  * lib/papers/queries.ts#listPapers.
  */
+const NOTES_PAGE_SIZE = 500;
+
 export async function listNotesForPaper(
   supabase: SupabaseClient,
   paperId: string
 ): Promise<Note[]> {
-  const { data, error } = await supabase
-    .from("notes")
-    .select("*")
-    .eq("paper_id", paperId)
-    .order("created_at", { ascending: true });
+  // Paged deliberately. An unbounded select is still capped by the
+  // server's own default row limit, and because this is ordered oldest
+  // first, hitting that cap silently drops the NEWEST notes -- a stroke
+  // saves without error, stays on screen, and is gone after a reload,
+  // which is indistinguishable from it never having been saved.
+  const all: Note[] = [];
+  for (let offset = 0; ; offset += NOTES_PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from("notes")
+      .select("*")
+      .eq("paper_id", paperId)
+      .order("created_at", { ascending: true })
+      .range(offset, offset + NOTES_PAGE_SIZE - 1);
 
-  if (error) {
-    throw new Error(`Failed to list notes: ${error.message}`);
+    if (error) {
+      throw new Error(`Failed to list notes: ${error.message}`);
+    }
+
+    const page = (data ?? []) as Note[];
+    all.push(...page);
+    // A short page means this was the last one. Asking again would
+    // return nothing and cost a round trip.
+    if (page.length < NOTES_PAGE_SIZE) break;
   }
 
-  return (data ?? []) as Note[];
+  return all;
 }
