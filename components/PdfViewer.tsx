@@ -64,6 +64,14 @@ export default function PdfViewer({
   // Diagnostic only, opt-in via ?inkdebug=1 — see lib/annotations/ink-profiler.ts.
   const [inkReport, setInkReport] = useState<StrokeReport | null>(null);
   const [inkTally, setInkTally] = useState<InkTally | null>(null);
+  // Pen presses seen at the document, which is every one the browser
+  // delivered at all. AnnotationCanvas counts the ones that reached it;
+  // a gap between the two means the press never got there, and the
+  // recorded target says what it landed on instead. No counter inside
+  // the canvas can see this: a stroke that never starts increments
+  // nothing, so started == ended-up stays true while strokes go missing.
+  const [penDowns, setPenDowns] = useState(0);
+  const [lastDownTarget, setLastDownTarget] = useState("");
   const inkDebug = typeof window !== "undefined" && inkDebugEnabled(window.location.search);
 
   // Inline arrow props are a new function on every render, which would
@@ -105,6 +113,19 @@ export default function PdfViewer({
       if (selection && !selection.isCollapsed) selection.removeAllRanges();
     };
 
+    const countPenDown = (event: Event) => {
+      const pointer = event as PointerEvent;
+      if (pointer.pointerType !== "pen") return;
+      setPenDowns((current) => current + 1);
+      const target = event.target as Element | null;
+      setLastDownTarget(
+        target
+          ? target.getAttribute("data-testid") ??
+              `${target.tagName.toLowerCase()}.${target.className || "(no class)"}`.slice(0, 40)
+          : "(none)"
+      );
+    };
+
     const refuse = (event: Event) => event.preventDefault();
 
     dropSelection();
@@ -113,12 +134,14 @@ export default function PdfViewer({
     // Capture phase: get ahead of anything that would act on a lingering
     // selection before the stroke has a chance to start.
     document.addEventListener("pointerdown", dropSelection, true);
+    if (inkDebug) document.addEventListener("pointerdown", countPenDown, true);
     return () => {
       document.body.classList.remove(DRAWING_BODY_CLASS);
       document.removeEventListener("selectstart", refuse);
       document.removeEventListener("pointerdown", dropSelection, true);
+      document.removeEventListener("pointerdown", countPenDown, true);
     };
-  }, [penMode]);
+  }, [penMode, inkDebug]);
   const containerRef = useRef<HTMLDivElement>(null);
   const pageWrapperRef = useRef<HTMLDivElement>(null);
 
@@ -389,6 +412,8 @@ export default function PdfViewer({
           {inkReport ? formatReport(inkReport) : "ink profiler armed — draw a stroke"}
           {inkTally ? `
 ${formatTally(inkTally)}` : ""}
+          {`
+pen downs at document ${penDowns}  last on ${lastDownTarget || "n/a"}`}
         </pre>
       )}
       <div className="pdf-viewer-controls">
