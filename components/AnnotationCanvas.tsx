@@ -14,7 +14,6 @@ import {
   InkProfiler,
   emptyTally,
   inkDebugEnabled,
-  touchActionOverride,
   type InkTally,
   type StrokeReport,
 } from "@/lib/annotations/ink-profiler";
@@ -125,9 +124,11 @@ function AnnotationCanvas({
   // never appended to drawingPointsRef, so nothing speculative is saved.
   const predictedRef = useRef<Point[]>([]);
   const tallyRef = useRef<InkTally>(emptyTally());
-  // Default unchanged until the override proves it is worth the zoom.
-  const touchAction =
-    (typeof window !== "undefined" && touchActionOverride(window.location.search)) || "pinch-zoom";
+  // Read once. This used to be re-parsed from the URL on every
+  // pointerdown, which is diagnostic cost charged to normal drawing.
+  const [debugging] = useState(
+    () => typeof window !== "undefined" && inkDebugEnabled(window.location.search)
+  );
   // One canvas holds everything: saved ink and the stroke currently
   // being drawn. Two full-page canvases meant two full-page textures
   // stacked over the PDF, one of them re-uploaded every frame -- which
@@ -152,6 +153,7 @@ function AnnotationCanvas({
   }[keyof InkTally];
 
   function bumpTally(field: CountedField, notify = true) {
+    if (!debugging) return;
     tallyRef.current = { ...tallyRef.current, [field]: tallyRef.current[field] + 1 };
     if (notify) onTally?.(tallyRef.current);
   }
@@ -174,6 +176,7 @@ function AnnotationCanvas({
   // after every render. Must not notify -- see bumpTally.
   const previousPropsRef = useRef<Record<string, unknown>>({});
   useEffect(() => {
+    if (!debugging) return;
     const current: Record<string, unknown> = {
       width,
       height,
@@ -438,7 +441,7 @@ function AnnotationCanvas({
       // requirement; drawing still works without it.
     }
 
-    if (inkDebugEnabled(window.location.search)) {
+    if (debugging) {
       profilerRef.current = new InkProfiler(strokes.length);
       profilerRef.current.begin(performance.now());
     }
@@ -629,7 +632,10 @@ function AnnotationCanvas({
         position: "absolute",
         top: 0,
         left: 0,
-        touchAction: interactive ? touchAction : "auto",
+        // Measured against `none`, which detected FEWER hard, short
+        // jabs rather than more. Keeping pinch-zoom therefore costs
+        // nothing here and keeps two-finger zoom while drawing.
+        touchAction: interactive ? "pinch-zoom" : "auto",
         pointerEvents: interactive ? "auto" : "none",
       }}
     >

@@ -1,11 +1,5 @@
 import { describe, expect, test, vi } from "vitest";
-import {
-  InkProfiler,
-  formatReport,
-  inkDebugEnabled,
-  summarize,
-  touchActionOverride,
-} from "./ink-profiler";
+import { InkProfiler, formatReport, inkDebugEnabled, summarize } from "./ink-profiler";
 
 describe("summarize", () => {
   test("returns zeroes for no samples rather than NaN", () => {
@@ -182,19 +176,5 @@ describe("prediction reporting", () => {
     profiler.begin(0);
     expect(profiler.end(1).predictedPerMove).toBe(0);
     vi.unstubAllGlobals();
-  });
-});
-
-describe("touchActionOverride", () => {
-  test("returns null when absent, leaving the component's default in place", () => {
-    expect(touchActionOverride("")).toBeNull();
-    expect(touchActionOverride("?inkdebug=1")).toBeNull();
-  });
-
-  test("accepts only the two values being compared", () => {
-    expect(touchActionOverride("?inktouch=none")).toBe("none");
-    expect(touchActionOverride("?inktouch=pinch-zoom")).toBe("pinch-zoom");
-    expect(touchActionOverride("?inktouch=manipulation")).toBeNull();
-    expect(touchActionOverride("?inktouch=")).toBeNull();
   });
 });

@@ -46,6 +46,7 @@ function setupCanvas(overrides: Partial<Parameters<typeof AnnotationCanvas>[0]> 
 describe("AnnotationCanvas", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    window.history.replaceState({}, "", "/");
   });
 
   it("reports a completed drag as a normalized stroke via onStrokeComplete", () => {
@@ -589,6 +590,7 @@ describe("AnnotationCanvas", () => {
   });
 
   it("counts a stroke the browser cancels separately from one that ended normally", () => {
+    enableInkDebug();
     const onTally = vi.fn();
     const { surface } = setupCanvas({ onTally });
 
@@ -605,6 +607,7 @@ describe("AnnotationCanvas", () => {
   });
 
   it("counts a finger landing mid-stroke, which is how a palm shows up", () => {
+    enableInkDebug();
     const onTally = vi.fn();
     const { surface } = setupCanvas({ onTally });
 
@@ -618,6 +621,7 @@ describe("AnnotationCanvas", () => {
   });
 
   it("does not count a finger that lands while no stroke is in progress", () => {
+    enableInkDebug();
     const onTally = vi.fn();
     const { surface } = setupCanvas({ onTally });
 
@@ -702,6 +706,15 @@ describe("AnnotationCanvas", () => {
       }
     }
     return out;
+  }
+
+  /**
+   * The tally is diagnostic and now costs nothing unless it is asked
+   * for, so a test that reads it has to ask for it. Read once at mount,
+   * so this must be set before rendering.
+   */
+  function enableInkDebug() {
+    window.history.replaceState({}, "", "?inkdebug=1");
   }
 
   function penMove(surface: Element, x: number, y: number) {
@@ -833,6 +846,7 @@ describe("AnnotationCanvas", () => {
   });
 
   it("does not report the render count on every render, which would be a render loop", () => {
+    enableInkDebug();
     const onTally = vi.fn();
     const { surface, rerenderWith } = setupCanvas({ onTally });
 
