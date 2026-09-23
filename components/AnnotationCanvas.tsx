@@ -10,7 +10,13 @@ import {
 } from "@/lib/annotations/stroke-geometry";
 import type { Stroke } from "@/lib/annotations/queries";
 import { doesEraserPathIntersectStroke } from "@/lib/annotations/stroke-hit-test";
-import { InkProfiler, inkDebugEnabled, type StrokeReport } from "@/lib/annotations/ink-profiler";
+import {
+  InkProfiler,
+  emptyTally,
+  inkDebugEnabled,
+  type InkTally,
+  type StrokeReport,
+} from "@/lib/annotations/ink-profiler";
 
 // Strokes saved before color/width support existed have neither field —
 // render them the same way they always looked, rather than requiring a
@@ -89,6 +95,7 @@ export default function AnnotationCanvas({
   onEraseStroke,
   interactive,
   onProfileReport,
+  onTally,
 }: {
   width: number;
   height: number;
@@ -101,6 +108,7 @@ export default function AnnotationCanvas({
   interactive: boolean;
   // Diagnostic only, opt-in via ?inkdebug=1 — see lib/annotations/ink-profiler.ts.
   onProfileReport?: (report: StrokeReport) => void;
+  onTally?: (tally: InkTally) => void;
 }) {
   const drawingPointsRef = useRef<Point[]>([]);
   // Client coordinates sampled since the last frame, still unconverted.
@@ -115,6 +123,12 @@ export default function AnnotationCanvas({
   // end of the live stroke and thrown away on the next frame -- they are
   // never appended to drawingPointsRef, so nothing speculative is saved.
   const predictedRef = useRef<Point[]>([]);
+  const tallyRef = useRef<InkTally>(emptyTally());
+
+  function bumpTally(field: keyof InkTally) {
+    tallyRef.current = { ...tallyRef.current, [field]: tallyRef.current[field] + 1 };
+    onTally?.(tallyRef.current);
+  }
 
   // Drop only the pending strokes that have actually appeared in the
   // parent's `strokes` prop — not the whole buffer, since other strokes
@@ -212,7 +226,15 @@ export default function AnnotationCanvas({
   }
 
   function handlePointerDown(event: React.PointerEvent) {
-    if (!interactive || event.pointerType === "touch") return;
+    if (!interactive) return;
+    if (event.pointerType === "touch") {
+      // A palm landing mid-stroke is the classic way a pen gesture gets
+      // taken away; counting them is how we tell that apart from a
+      // stroke that never started.
+      if (drawingPointsRef.current.length > 0) bumpTally("touchWhileDrawing");
+      return;
+    }
+    bumpTally("started");
 
     // Belt-and-suspenders alongside the `touch-action` CSS: some WebKit
     // versions still let a nested scrollable ancestor (the
@@ -333,6 +355,14 @@ export default function AnnotationCanvas({
       setPendingStrokes((current) => [...current, stroke]);
       onStrokeComplete([stroke]);
     }
+    if (
+      (tool === "pen" || tool === "highlighter") &&
+      drawingPointsRef.current.length > 0 &&
+      !isCompletedMark(drawingPointsRef.current)
+    ) {
+      bumpTally("discarded");
+    }
+
     drawingPointsRef.current = [];
     pendingRawRef.current = [];
     predictedRef.current = [];
@@ -354,6 +384,7 @@ export default function AnnotationCanvas({
 
   function handlePointerUp(event: React.PointerEvent) {
     if (event.pointerType === "touch") return;
+    if (drawingPointsRef.current.length > 0) bumpTally("endedByUp");
     // Only pointerdown fired for this stroke, with zero pointermoves in
     // between (a very fast, short mark) — record the release position too,
     // so it isn't discarded outright for having just a single point.
@@ -379,7 +410,14 @@ export default function AnnotationCanvas({
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
-      onPointerCancel={finishDrawing}
+      onPointerCancel={() => {
+        // The browser took the gesture away mid-stroke. Whatever ink was
+        // drawn is still the user's, so it is kept rather than dropped --
+        // but the event is counted, because a stroke that dies this way
+        // is indistinguishable from one that never worked.
+        if (drawingPointsRef.current.length > 0) bumpTally("endedByCancel");
+        finishDrawing();
+      }}
       style={{
         touchAction: interactive ? "pinch-zoom" : "auto",
         pointerEvents: interactive ? "auto" : "none",

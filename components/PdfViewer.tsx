@@ -8,7 +8,13 @@ import { canGoNext, canGoPrevious, clampPage, nextPage, previousPage } from "@/l
 import { getSelectionText } from "@/lib/pdf/selection-text";
 import { expandToSentence } from "@/lib/pdf/sentence-selection";
 import AnnotationCanvas from "./AnnotationCanvas";
-import { formatReport, inkDebugEnabled, type StrokeReport } from "@/lib/annotations/ink-profiler";
+import {
+  formatReport,
+  formatTally,
+  inkDebugEnabled,
+  type InkTally,
+  type StrokeReport,
+} from "@/lib/annotations/ink-profiler";
 import AnnotationToolbar, { PALETTE, DEFAULT_WIDTH } from "./AnnotationToolbar";
 import type { Stroke } from "@/lib/annotations/queries";
 import type { PdfDocumentProxy } from "@/lib/pdf/extract-full-text";
@@ -53,6 +59,7 @@ export default function PdfViewer({
   const [hasActiveSelection, setHasActiveSelection] = useState(false);
   // Diagnostic only, opt-in via ?inkdebug=1 — see lib/annotations/ink-profiler.ts.
   const [inkReport, setInkReport] = useState<StrokeReport | null>(null);
+  const [inkTally, setInkTally] = useState<InkTally | null>(null);
   const inkDebug = typeof window !== "undefined" && inkDebugEnabled(window.location.search);
 
   // A stylus drag over the PDF text layer is a text-selection gesture as
@@ -325,6 +332,7 @@ export default function PdfViewer({
               onEraseStroke={(index) => onEraseStroke?.(index)}
               interactive={penMode}
               onProfileReport={inkDebug ? setInkReport : undefined}
+              onTally={inkDebug ? setInkTally : undefined}
             />
           </div>
         </div>
@@ -363,6 +371,8 @@ export default function PdfViewer({
           {`build ${process.env.NEXT_PUBLIC_BUILD_SHA ?? "?"}
 `}
           {inkReport ? formatReport(inkReport) : "ink profiler armed — draw a stroke"}
+          {inkTally ? `
+${formatTally(inkTally)}` : ""}
         </pre>
       )}
       <div className="pdf-viewer-controls">

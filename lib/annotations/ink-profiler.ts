@@ -161,3 +161,39 @@ export function formatReport(r: StrokeReport): string {
     `saved strokes on page ${r.savedStrokes}`,
   ].join("\n");
 }
+
+/**
+ * Running counts across a whole drawing session, as opposed to the
+ * single-stroke StrokeReport. A dropout is only visible in the relation
+ * between strokes -- one that never started leaves no report at all, and
+ * one that was killed leaves a report that simply ends early -- so the
+ * tallies have to outlive the stroke.
+ *
+ * The three outcomes tell different stories:
+ *   endedByUp     the pen finished the stroke normally
+ *   endedByCancel the browser took the gesture away mid-stroke, which is
+ *                 what a palm landing on the page does to a pen stroke
+ *   discarded     the stroke completed but was not worth saving
+ *
+ * touchWhileDrawing counts finger/palm contacts seen while a pen stroke
+ * was in progress. If cancels track it, palm rejection is the problem.
+ */
+export type InkTally = {
+  started: number;
+  endedByUp: number;
+  endedByCancel: number;
+  discarded: number;
+  touchWhileDrawing: number;
+};
+
+export function emptyTally(): InkTally {
+  return { started: 0, endedByUp: 0, endedByCancel: 0, discarded: 0, touchWhileDrawing: 0 };
+}
+
+export function formatTally(t: InkTally): string {
+  const lost = t.started - t.endedByUp;
+  return [
+    `strokes ${t.started}  ended-up ${t.endedByUp}  CANCELLED ${t.endedByCancel}  discarded ${t.discarded}`,
+    `touches during strokes ${t.touchWhileDrawing}   unaccounted ${lost - t.endedByCancel}`,
+  ].join("\n");
+}

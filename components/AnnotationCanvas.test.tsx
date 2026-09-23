@@ -558,4 +558,43 @@ describe("AnnotationCanvas", () => {
     const polyline = document.querySelector("path") as SVGPathElement;
     expect(polyline.getAttribute("stroke-opacity")).toBe("1");
   });
+
+  it("counts a stroke the browser cancels separately from one that ended normally", () => {
+    const onTally = vi.fn();
+    const { surface } = setupCanvas({ onTally });
+
+    fireEvent.pointerDown(surface, { clientX: 80, clientY: 60, pointerType: "pen" });
+    fireEvent.pointerMove(surface, { clientX: 200, clientY: 150, pointerType: "pen" });
+    fireEvent.pointerCancel(surface, { clientX: 200, clientY: 150, pointerType: "pen" });
+
+    const latest = onTally.mock.calls.at(-1)![0];
+    // A cancelled stroke and one that never started both look like
+    // "nothing appeared" to the user; only the counts tell them apart.
+    expect(latest.started).toBe(1);
+    expect(latest.endedByCancel).toBe(1);
+    expect(latest.endedByUp).toBe(0);
+  });
+
+  it("counts a finger landing mid-stroke, which is how a palm shows up", () => {
+    const onTally = vi.fn();
+    const { surface } = setupCanvas({ onTally });
+
+    fireEvent.pointerDown(surface, { clientX: 80, clientY: 60, pointerType: "pen" });
+    fireEvent.pointerDown(surface, { clientX: 300, clientY: 400, pointerType: "touch" });
+
+    const latest = onTally.mock.calls.at(-1)![0];
+    expect(latest.touchWhileDrawing).toBe(1);
+    // The touch must not be mistaken for a second stroke.
+    expect(latest.started).toBe(1);
+  });
+
+  it("does not count a finger that lands while no stroke is in progress", () => {
+    const onTally = vi.fn();
+    const { surface } = setupCanvas({ onTally });
+
+    fireEvent.pointerDown(surface, { clientX: 300, clientY: 400, pointerType: "touch" });
+
+    const latest = onTally.mock.calls.at(-1);
+    expect(latest?.[0].touchWhileDrawing ?? 0).toBe(0);
+  });
 });
