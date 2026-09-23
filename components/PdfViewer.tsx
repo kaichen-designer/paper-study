@@ -445,7 +445,8 @@ export default function PdfViewer({
 ${formatTally(inkTally)}` : ""}
           {`
 pen downs ${penDowns}  STYLUS contacts ${stylusContacts}  (palm/finger ${otherContacts})
-last on ${lastDownTarget || "n/a"}`}
+last on ${lastDownTarget || "n/a"}
+STROKES ON THIS PAGE NOW: ${(strokes ?? NO_STROKES).length}`}
         </pre>
       )}
       <div className="pdf-viewer-controls">
