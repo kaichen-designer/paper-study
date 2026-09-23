@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import AnnotationCanvas from "./AnnotationCanvas";
 
@@ -44,6 +44,10 @@ function setupCanvas(overrides: Partial<Parameters<typeof AnnotationCanvas>[0]> 
 }
 
 describe("AnnotationCanvas", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("reports a completed drag as a normalized stroke via onStrokeComplete", () => {
     const { surface, onStrokeComplete } = setupCanvas();
 
@@ -350,7 +354,7 @@ describe("AnnotationCanvas", () => {
       strokes: [{ points: [{ x: 0.1, y: 0.1 }, { x: 0.9, y: 0.9 }] }],
     });
 
-    const savedLayer = screen.getByTestId("annotation-saved-layer");
+    const savedLayer = screen.getByTestId("annotation-ink-layer");
     // A bitmap, structurally separate from the input surface: nothing in
     // it can become a pointer target, and its cost does not grow with
     // how much has been drawn.
@@ -368,7 +372,7 @@ describe("AnnotationCanvas", () => {
 
     // Saved ink used to be one <path> per stroke, each hit-tested
     // against every pointer event and re-rasterized with its layer.
-    expect(screen.getByTestId("annotation-saved-layer").children).toHaveLength(0);
+    expect(screen.getByTestId("annotation-ink-layer").children).toHaveLength(0);
     vi.restoreAllMocks();
   });
 
@@ -669,9 +673,10 @@ describe("AnnotationCanvas", () => {
       return contexts.get(this) as CanvasRenderingContext2D;
     });
 
-    const saved = () => calls.filter((call) => call.layer === "annotation-saved-layer");
-    const live = () => calls.filter((call) => call.layer === "annotation-live-canvas");
-    return { calls, saved, live };
+    const ink = () => calls.filter((call) => call.layer === "annotation-ink-layer");
+    // Saved ink and the live stroke share one canvas; both names read on
+    // the same layer.
+    return { calls, saved: ink, live: ink, ink };
   }
 
   type Painted = { color?: unknown; width?: unknown; alpha?: unknown; path: string[] };
@@ -761,19 +766,22 @@ describe("AnnotationCanvas", () => {
     vi.restoreAllMocks();
   });
 
-  it("clears the canvas when a stroke ends, so it cannot bleed into the next one", async () => {
-    const { calls, live } = stubCanvas();
-    const { surface } = setupCanvas();
+  it("does not clear the canvas when a stroke starts, which would wipe every saved stroke", async () => {
+    const { ink } = stubCanvas();
+    const { surface } = setupCanvas({
+      strokes: [{ points: [{ x: 0.1, y: 0.1 }, { x: 0.5, y: 0.5 }] }],
+    });
+    await nextFrame();
 
+    const before = ink().filter((call) => call.op === "clearRect").length;
     fireEvent.pointerDown(surface, { clientX: 0, clientY: 0, pointerType: "pen" });
     penMove(surface, 100, 50);
     await nextFrame();
-    calls.length = 0;
 
-    fireEvent.pointerUp(surface, { clientX: 100, clientY: 50, pointerType: "pen" });
-
-    expect(live().some((call) => call.op === "clearRect")).toBe(true);
-    vi.restoreAllMocks();
+    // Saved ink and the live stroke share one canvas, so clearing on
+    // pointerdown would erase the whole page's annotations.
+    expect(ink().filter((call) => call.op === "clearRect").length).toBe(before);
+    expect(ink().some((call) => call.op === "quadraticCurveTo" || call.op === "lineTo")).toBe(true);
   });
 
   it("still draws when no canvas context is available, rather than losing the stroke", async () => {
@@ -798,7 +806,7 @@ describe("AnnotationCanvas", () => {
 
     fireEvent.pointerDown(surface, { clientX: 10, clientY: 10, pointerType: "pen" });
 
-    const savedLayer = screen.getByTestId("annotation-saved-layer");
+    const savedLayer = screen.getByTestId("annotation-ink-layer");
     expect(savedLayer.querySelectorAll("path")).toHaveLength(0);
 
     // An earlier stroke's save lands while the pen is still down. Taking
@@ -853,7 +861,7 @@ describe("AnnotationCanvas", () => {
     penMove(surface, 200, 0);
     await nextFrame();
 
-    const canvas = screen.getByTestId("annotation-live-canvas") as HTMLCanvasElement;
+    const canvas = screen.getByTestId("annotation-ink-layer") as HTMLCanvasElement;
     const widthBefore = canvas.width;
     calls.length = 0;
 

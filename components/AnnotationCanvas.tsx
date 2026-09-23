@@ -124,8 +124,12 @@ function AnnotationCanvas({
   // never appended to drawingPointsRef, so nothing speculative is saved.
   const predictedRef = useRef<Point[]>([]);
   const tallyRef = useRef<InkTally>(emptyTally());
-  const liveCanvasRef = useRef<HTMLCanvasElement>(null);
-  const savedCanvasRef = useRef<HTMLCanvasElement>(null);
+  // One canvas holds everything: saved ink and the stroke currently
+  // being drawn. Two full-page canvases meant two full-page textures
+  // stacked over the PDF, one of them re-uploaded every frame -- which
+  // doubled the frame time on an empty page (17ms before these layers
+  // existed, 33ms after) regardless of how much was drawn.
+  const inkCanvasRef = useRef<HTMLCanvasElement>(null);
   // How much of the live stroke is already painted onto the canvas, and
   // where that painted path ends. Everything before this index is
   // settled and never redrawn.
@@ -193,31 +197,19 @@ function AnnotationCanvas({
   // Sizing lives here rather than on the drawing path: assigning a
   // canvas dimension clears it, so it must never happen mid-stroke, and
   // the drawing path only runs while the pen is down.
-  function sizeLiveCanvas() {
-    const canvas = liveCanvasRef.current;
-    if (!canvas) return;
-    // Never while the pen is down: assigning a dimension clears the
-    // canvas, and the page's measured size can shift under a re-render
-    // mid-stroke, wiping the ink being drawn.
-    if (drawingPointsRef.current.length > 0) return;
-    const ratio = window.devicePixelRatio || 1;
-    const pixelWidth = Math.round(width * ratio);
-    const pixelHeight = Math.round(height * ratio);
-    if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
-      canvas.width = pixelWidth;
-      canvas.height = pixelHeight;
-    }
-  }
-
-  useEffect(sizeLiveCanvas, [width, height]);
-
-  // Repaints the whole saved layer. Only runs when the ink or the page
-  // size actually changes -- and settledStrokes is held steady while the
-  // pen is down, so this never lands mid-stroke.
-  useEffect(() => {
-    const canvas = savedCanvasRef.current;
+  /**
+   * Repaints every saved and pending stroke from scratch, sizing the
+   * canvas first if the page changed size.
+   *
+   * Never runs while the pen is down. Assigning a canvas dimension
+   * clears it, and a clear-and-repaint mid-stroke would erase the ink
+   * being drawn -- which is live on this same canvas.
+   */
+  function repaintInk() {
+    const canvas = inkCanvasRef.current;
     const context = canvas?.getContext?.("2d");
     if (!canvas || !context) return;
+    if (drawingPointsRef.current.length > 0) return;
 
     const ratio = window.devicePixelRatio || 1;
     const pixelWidth = Math.round(width * ratio);
@@ -226,6 +218,7 @@ function AnnotationCanvas({
       canvas.width = pixelWidth;
       canvas.height = pixelHeight;
     }
+
     context.setTransform(1, 0, 0, 1, 0, 0);
     context.clearRect(0, 0, canvas.width, canvas.height);
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
@@ -239,7 +232,9 @@ function AnnotationCanvas({
       paintStroke(context, stroke.points, width, height);
     }
     context.globalAlpha = 1;
-  }, [settledStrokes, pendingStrokes, width, height]);
+  }
+
+  useEffect(repaintInk, [settledStrokes, pendingStrokes, width, height]);
 
   // Drop only the pending strokes that have actually appeared in the
   // parent's `strokes` prop — not the whole buffer, since other strokes
@@ -342,7 +337,7 @@ function AnnotationCanvas({
    * whole path in SVG.
    */
   function liveContext(): CanvasRenderingContext2D | null {
-    const canvas = liveCanvasRef.current;
+    const canvas = inkCanvasRef.current;
     if (!canvas) return null;
     const ratio = window.devicePixelRatio || 1;
     const pixelWidth = Math.round(width * ratio);
@@ -357,14 +352,6 @@ function AnnotationCanvas({
     if (!context) return null;
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
     return context;
-  }
-
-  function clearLiveCanvas() {
-    const canvas = liveCanvasRef.current;
-    const context = canvas?.getContext?.("2d");
-    if (!canvas || !context) return;
-    context.setTransform(1, 0, 0, 1, 0, 0);
-    context.clearRect(0, 0, canvas.width, canvas.height);
   }
 
   function scheduleFlush() {
@@ -454,7 +441,6 @@ function AnnotationCanvas({
 
     settledIndexRef.current = 1;
     settledEndRef.current = null;
-    clearLiveCanvas();
 
     const point = toLocalPoint(event);
     drawingPointsRef.current = [point];
@@ -562,13 +548,12 @@ function AnnotationCanvas({
     predictedRef.current = [];
     settledIndexRef.current = 1;
     settledEndRef.current = null;
-    clearLiveCanvas();
 
-    // Pen is off the page: safe to take on whatever arrived while it was
-    // down, now that doing so cannot cost a frame mid-gesture, and to
-    // apply a page size that changed while it was.
+    // The stroke is already painted on the ink canvas, so there is
+    // nothing to clear and nothing to redraw here. Taking on ink that
+    // arrived while the pen was down triggers the repaint, which now
+    // also applies any page size change that happened mid-stroke.
     setSettledStrokes(latestStrokesRef.current);
-    sizeLiveCanvas();
     liveStrokeRef.current?.setAttribute("d", "");
     hideEraserCursor();
 
@@ -601,18 +586,15 @@ function AnnotationCanvas({
   }
 
   return (
-    // Two stacked layers on purpose. The live stroke is rewritten every
-    // frame while the saved ink changes only when a stroke finishes, and
-    // sharing one <svg> meant each live update repainted every saved
-    // stroke with it -- measured at 34ms per frame (30fps) on a page
-    // holding ~40 strokes, against 17ms on an empty one. Ink appearing a
-    // frame at a time in 30fps jumps is what reads as the pen cutting
-    // out. Split, the live layer repaints alone and the saved layer is
-    // left composited.
+    // One ink canvas, plus a transparent SVG on top that exists only to
+    // receive pointer input and to carry the few unsettled points at the
+    // tip of the stroke. Every extra full-page layer here is another
+    // full-page texture composited over the PDF on every frame, and they
+    // cost more than the drawing does.
     <div style={{ position: "relative", width, height }}>
       <canvas
-        ref={savedCanvasRef}
-        data-testid="annotation-saved-layer"
+        ref={inkCanvasRef}
+        data-testid="annotation-ink-layer"
         style={{
           position: "absolute",
           top: 0,
@@ -620,23 +602,6 @@ function AnnotationCanvas({
           width,
           height,
           pointerEvents: "none",
-        }}
-      />
-      <canvas
-        ref={liveCanvasRef}
-        data-testid="annotation-live-canvas"
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-          width,
-          height,
-          pointerEvents: "none",
-          // Applied to the whole layer rather than per segment: painting
-          // translucent segments one at a time would darken every place
-          // they overlap, which a single SVG path with stroke-opacity
-          // does not do.
-          opacity: tool === "highlighter" ? HIGHLIGHTER_OPACITY : 1,
         }}
       />
     <svg
@@ -661,10 +626,6 @@ function AnnotationCanvas({
         left: 0,
         touchAction: interactive ? "pinch-zoom" : "auto",
         pointerEvents: interactive ? "auto" : "none",
-        // Keep this layer off the saved layer's raster while drawing, so
-        // a live update never drags the saved ink through a repaint.
-        transform: "translateZ(0)",
-        willChange: interactive ? "transform" : "auto",
       }}
     >
       {/*
