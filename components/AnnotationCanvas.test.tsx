@@ -610,4 +610,121 @@ describe("AnnotationCanvas", () => {
     const latest = onTally.mock.calls.at(-1);
     expect(latest?.[0].touchWhileDrawing ?? 0).toBe(0);
   });
+
+  type Recorded = { op: string; args: number[] };
+
+  function stubCanvas() {
+    const calls: Recorded[] = [];
+    const record = (op: string) => (...args: number[]) => calls.push({ op, args });
+    const context = {
+      setTransform: record("setTransform"),
+      clearRect: record("clearRect"),
+      beginPath: record("beginPath"),
+      moveTo: record("moveTo"),
+      quadraticCurveTo: record("quadraticCurveTo"),
+      stroke: record("stroke"),
+      strokeStyle: "",
+      lineWidth: 0,
+      lineCap: "",
+      lineJoin: "",
+    };
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(
+      context as unknown as CanvasRenderingContext2D
+    );
+    return { calls, context };
+  }
+
+  function penMove(surface: Element, x: number, y: number) {
+    const move = new PointerEvent("pointermove", {
+      clientX: x,
+      clientY: y,
+      pointerType: "pen",
+      bubbles: true,
+    });
+    Object.defineProperty(move, "getCoalescedEvents", {
+      value: () => [{ clientX: x, clientY: y }],
+    });
+    fireEvent(surface, move);
+  }
+
+  it("paints settled segments onto the canvas and leaves only a short tail in SVG", async () => {
+    const { calls } = stubCanvas();
+    const { surface } = setupCanvas();
+
+    fireEvent.pointerDown(surface, { clientX: 0, clientY: 0, pointerType: "pen" });
+    penMove(surface, 100, 0);
+    penMove(surface, 200, 0);
+    penMove(surface, 300, 0);
+    await nextFrame();
+
+    const curves = calls.filter((call) => call.op === "quadraticCurveTo");
+    // Points 0..3: the curves through points 1 and 2 are final once the
+    // next point exists, so both are painted; point 3 is still moving.
+    expect(curves).toHaveLength(2);
+
+    const livePath = document.querySelector(
+      '[data-testid="annotation-live-stroke"]'
+    ) as SVGPathElement;
+    // The tail is the settled end plus the current point -- two points,
+    // however long the stroke gets. That bounded box is the entire point
+    // of moving the stroke off SVG. The settled end is the midpoint
+    // between points 2 and 3, since the curve through point 2 ends there.
+    expect(livePath.getAttribute("d")).toBe("M 250 0 L 300 0");
+
+    vi.restoreAllMocks();
+  });
+
+  it("does not repaint settled segments as the stroke grows", async () => {
+    const { calls } = stubCanvas();
+    const { surface } = setupCanvas();
+
+    fireEvent.pointerDown(surface, { clientX: 0, clientY: 0, pointerType: "pen" });
+    penMove(surface, 100, 0);
+    penMove(surface, 200, 0);
+    await nextFrame();
+    const afterFirst = calls.filter((c) => c.op === "quadraticCurveTo").length;
+
+    penMove(surface, 300, 0);
+    penMove(surface, 400, 0);
+    await nextFrame();
+    const afterSecond = calls.filter((c) => c.op === "quadraticCurveTo").length;
+
+    // Two more points, two more curves -- not a redraw of everything so
+    // far. Cost per frame stays flat instead of growing with the stroke.
+    expect(afterSecond - afterFirst).toBe(2);
+
+    vi.restoreAllMocks();
+  });
+
+  it("clears the canvas when a stroke ends, so it cannot bleed into the next one", async () => {
+    const { calls } = stubCanvas();
+    const { surface } = setupCanvas();
+
+    fireEvent.pointerDown(surface, { clientX: 0, clientY: 0, pointerType: "pen" });
+    penMove(surface, 100, 50);
+    await nextFrame();
+    calls.length = 0;
+
+    fireEvent.pointerUp(surface, { clientX: 100, clientY: 50, pointerType: "pen" });
+
+    expect(calls.some((call) => call.op === "clearRect")).toBe(true);
+    vi.restoreAllMocks();
+  });
+
+  it("still draws when no canvas context is available, rather than losing the stroke", async () => {
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
+    const { surface } = setupCanvas();
+
+    fireEvent.pointerDown(surface, { clientX: 80, clientY: 60, pointerType: "pen" });
+    penMove(surface, 400, 300);
+    await nextFrame();
+
+    const livePath = document.querySelector(
+      '[data-testid="annotation-live-stroke"]'
+    ) as SVGPathElement;
+    // Falls back to the whole path in SVG: slower, but it draws.
+    expect(livePath.getAttribute("d")).toBe("M 80 60 L 400 300");
+
+    vi.restoreAllMocks();
+  });
 });

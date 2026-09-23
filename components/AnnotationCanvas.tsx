@@ -124,6 +124,12 @@ export default function AnnotationCanvas({
   // never appended to drawingPointsRef, so nothing speculative is saved.
   const predictedRef = useRef<Point[]>([]);
   const tallyRef = useRef<InkTally>(emptyTally());
+  const liveCanvasRef = useRef<HTMLCanvasElement>(null);
+  // How much of the live stroke is already painted onto the canvas, and
+  // where that painted path ends. Everything before this index is
+  // settled and never redrawn.
+  const settledIndexRef = useRef(1);
+  const settledEndRef = useRef<Point | null>(null);
 
   function bumpTally(field: keyof InkTally) {
     tallyRef.current = { ...tallyRef.current, [field]: tallyRef.current[field] + 1 };
@@ -170,11 +176,84 @@ export default function AnnotationCanvas({
     // drawingPointsRef, or a saved stroke would contain positions the pen
     // never visited.
     const predicted = predictedRef.current;
-    const toDraw =
-      predicted.length > 0
-        ? [...drawingPointsRef.current, ...predicted]
-        : drawingPointsRef.current;
-    liveStrokeRef.current?.setAttribute("d", smoothPathFromPoints(toDraw));
+    const points = drawingPointsRef.current;
+    const context = tool === "eraser" ? null : liveContext();
+
+    if (!context) {
+      const toDraw = predicted.length > 0 ? [...points, ...predicted] : points;
+      liveStrokeRef.current?.setAttribute("d", smoothPathFromPoints(toDraw));
+      return;
+    }
+
+    context.strokeStyle = strokeColor;
+    context.lineWidth = strokeWidth;
+    context.lineCap = "round";
+    context.lineJoin = "round";
+
+    if (settledEndRef.current === null) settledEndRef.current = points[0];
+
+    // Mirrors smoothPathFromPoints: each interior point is a quadratic
+    // control point, and the curve ends at the midpoint to the next one.
+    // That makes the curve through point i final as soon as point i+1
+    // arrives, so settled segments can be painted once and left alone.
+    for (let i = settledIndexRef.current; i <= points.length - 2; i++) {
+      const midpoint = {
+        x: (points[i].x + points[i + 1].x) / 2,
+        y: (points[i].y + points[i + 1].y) / 2,
+      };
+      const from = settledEndRef.current!;
+      context.beginPath();
+      context.moveTo(from.x, from.y);
+      context.quadraticCurveTo(points[i].x, points[i].y, midpoint.x, midpoint.y);
+      context.stroke();
+      settledEndRef.current = midpoint;
+    }
+    settledIndexRef.current = Math.max(settledIndexRef.current, points.length - 1);
+
+    // Only the unsettled tail stays in SVG: the last real point plus any
+    // prediction. A handful of points, so its bounding box stays small
+    // however long the stroke gets.
+    const tail = [settledEndRef.current!, points[points.length - 1], ...predicted];
+    liveStrokeRef.current?.setAttribute("d", smoothPathFromPoints(tail));
+  }
+
+  /**
+   * The live stroke is painted onto a canvas rather than an SVG path.
+   * Rewriting an SVG `d` invalidates the whole path's bounding box, which
+   * grows with the stroke until a long mark is repainting most of the
+   * page every frame -- measured at 34ms per frame on a dense page, half
+   * the display's rate, which is what makes ink arrive in visible jumps.
+   * A canvas keeps what it has already drawn, so each frame costs only
+   * the new segment.
+   *
+   * Returns null when no 2D context is available (jsdom, or a browser
+   * refusing the context), and the caller falls back to drawing the
+   * whole path in SVG.
+   */
+  function liveContext(): CanvasRenderingContext2D | null {
+    const canvas = liveCanvasRef.current;
+    if (!canvas) return null;
+    const ratio = window.devicePixelRatio || 1;
+    const pixelWidth = Math.round(width * ratio);
+    const pixelHeight = Math.round(height * ratio);
+    // Assigning either dimension clears the canvas, so only do it when
+    // the size actually changed -- never mid-stroke at a stable size.
+    if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+      canvas.width = pixelWidth;
+      canvas.height = pixelHeight;
+    }
+    const context = canvas.getContext("2d");
+    if (!context) return null;
+    context.setTransform(ratio, 0, 0, ratio, 0, 0);
+    return context;
+  }
+
+  function clearLiveCanvas() {
+    const canvas = liveCanvasRef.current;
+    const context = canvas?.getContext?.("2d");
+    if (!canvas || !context) return;
+    context.setTransform(1, 0, 0, 1, 0, 0);
+    context.clearRect(0, 0, canvas.width, canvas.height);
   }
 
   function scheduleFlush() {
@@ -261,6 +340,10 @@ export default function AnnotationCanvas({
       profilerRef.current = new InkProfiler(strokes.length);
       profilerRef.current.begin(performance.now());
     }
+
+    settledIndexRef.current = 1;
+    settledEndRef.current = null;
+    clearLiveCanvas();
 
     const point = toLocalPoint(event);
     drawingPointsRef.current = [point];
@@ -366,6 +449,9 @@ export default function AnnotationCanvas({
     drawingPointsRef.current = [];
     pendingRawRef.current = [];
     predictedRef.current = [];
+    settledIndexRef.current = 1;
+    settledEndRef.current = null;
+    clearLiveCanvas();
     liveStrokeRef.current?.setAttribute("d", "");
     hideEraserCursor();
 
@@ -444,6 +530,23 @@ export default function AnnotationCanvas({
           />
         ))}
       </svg>
+      <canvas
+        ref={liveCanvasRef}
+        data-testid="annotation-live-canvas"
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          width,
+          height,
+          pointerEvents: "none",
+          // Applied to the whole layer rather than per segment: painting
+          // translucent segments one at a time would darken every place
+          // they overlap, which a single SVG path with stroke-opacity
+          // does not do.
+          opacity: tool === "highlighter" ? HIGHLIGHTER_OPACITY : 1,
+        }}
+      />
     <svg
       ref={surfaceRef}
       data-testid="annotation-canvas-surface"
