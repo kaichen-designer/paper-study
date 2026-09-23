@@ -131,9 +131,16 @@ export default function AnnotationCanvas({
   const settledIndexRef = useRef(1);
   const settledEndRef = useRef<Point | null>(null);
 
-  function bumpTally(field: keyof InkTally) {
+  /**
+   * `notify: false` records the count without telling the parent. A
+   * counter that reports on every render is a render loop: reporting
+   * sets state, the state change renders, the render counts again. The
+   * first version of the render counter did exactly that and measured
+   * itself, at roughly 1600 renders per stroke.
+   */
+  function bumpTally(field: keyof InkTally, notify = true) {
     tallyRef.current = { ...tallyRef.current, [field]: tallyRef.current[field] + 1 };
-    onTally?.(tallyRef.current);
+    if (notify) onTally?.(tallyRef.current);
   }
 
   // Saving a stroke round-trips to the server, and the result lands
@@ -150,9 +157,10 @@ export default function AnnotationCanvas({
   }, [strokes]);
 
   // Counts renders that land mid-stroke; no dep array, so it runs after
-  // every one.
+  // every one. Must not notify -- see bumpTally. The accumulated count
+  // reaches the parent when the stroke ends.
   useEffect(() => {
-    if (drawingPointsRef.current.length > 0) bumpTally("rendersDuringStroke");
+    if (drawingPointsRef.current.length > 0) bumpTally("rendersDuringStroke", false);
   });
 
   // Drop only the pending strokes that have actually appeared in the

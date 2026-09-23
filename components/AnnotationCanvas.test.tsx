@@ -759,4 +759,24 @@ describe("AnnotationCanvas", () => {
     );
     expect(drawn).toContain("M 80 60 L 400 300");
   });
+
+  it("does not report the render count on every render, which would be a render loop", () => {
+    const onTally = vi.fn();
+    const { surface, rerenderWith } = setupCanvas({ onTally });
+
+    fireEvent.pointerDown(surface, { clientX: 10, clientY: 10, pointerType: "pen" });
+    const afterStart = onTally.mock.calls.length;
+
+    // Renders arriving mid-stroke must be counted silently. Reporting
+    // sets state in the parent, which renders, which counts again.
+    rerenderWith({ strokeColor: "#000000" });
+    rerenderWith({ strokeColor: "#111111" });
+    rerenderWith({ strokeColor: "#222222" });
+
+    expect(onTally.mock.calls.length).toBe(afterStart);
+
+    // The count still reaches the parent, once the stroke ends.
+    fireEvent.pointerUp(surface, { clientX: 20, clientY: 20, pointerType: "pen" });
+    expect(onTally.mock.calls.at(-1)![0].rendersDuringStroke).toBeGreaterThan(0);
+  });
 });
