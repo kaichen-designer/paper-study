@@ -320,7 +320,7 @@ describe("AnnotationCanvas", () => {
     ]);
   });
 
-  it("captures the pointer on the drawing surface, not on whatever stroke lies underneath", () => {
+  it("captures the pointer on the drawing surface", () => {
     const capturedOn: string[] = [];
     const original = (Element.prototype as unknown as Record<string, unknown>).setPointerCapture;
     (Element.prototype as unknown as Record<string, unknown>).setPointerCapture = function (
@@ -329,19 +329,32 @@ describe("AnnotationCanvas", () => {
       capturedOn.push(this.getAttribute("data-testid") ?? this.tagName);
     };
 
-    setupCanvas({ strokes: [{ points: [{ x: 0.1, y: 0.1 }, { x: 0.9, y: 0.9 }] }] });
-    // Starting a stroke on top of an existing one is unavoidable on a
-    // page with many annotations, and makes that stroke's <path> the
-    // event target.
-    const existing = document.querySelector("path:not([data-testid])") as SVGPathElement;
-    fireEvent.pointerDown(existing, { clientX: 200, clientY: 150, pointerType: "pen" });
+    const { surface } = setupCanvas({
+      strokes: [{ points: [{ x: 0.1, y: 0.1 }, { x: 0.9, y: 0.9 }] }],
+    });
+    fireEvent.pointerDown(surface, { clientX: 200, clientY: 150, pointerType: "pen" });
 
-    // Capturing on the <path> would tie the rest of the gesture to a node
-    // that unmounts as soon as the previous stroke's save round-trips,
-    // silently killing the stroke being drawn.
+    // Capture must land on a node that outlives the gesture. A stroke's
+    // own <path> does not: it unmounts as soon as an earlier save
+    // round-trips, which silently killed whatever was being drawn.
     expect(capturedOn).toEqual(["annotation-canvas-surface"]);
 
     (Element.prototype as unknown as Record<string, unknown>).setPointerCapture = original;
+  });
+
+  it("keeps saved ink in a separate layer that takes no pointer input at all", () => {
+    const { surface } = setupCanvas({
+      strokes: [{ points: [{ x: 0.1, y: 0.1 }, { x: 0.9, y: 0.9 }] }],
+    });
+
+    const savedLayer = screen.getByTestId("annotation-saved-layer");
+    // Structurally separate, so a stroke's <path> can never be the
+    // pointer target -- and so rewriting the live stroke every frame
+    // does not drag the saved ink through the repaint with it.
+    expect(savedLayer.contains(surface)).toBe(false);
+    expect(surface.contains(savedLayer)).toBe(false);
+    expect(savedLayer.style.pointerEvents).toBe("none");
+    expect(savedLayer.querySelectorAll("path").length).toBe(1);
   });
 
   it("does not let saved or pending strokes take pointer input away from the surface", () => {
