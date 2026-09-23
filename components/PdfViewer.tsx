@@ -72,13 +72,18 @@ export default function PdfViewer({
   // nothing, so started == ended-up stays true while strokes go missing.
   const [penDowns, setPenDowns] = useState(0);
   const [lastDownTarget, setLastDownTarget] = useState("");
-  // Touch starts are counted separately because they are the one signal
-  // that survives when a contact never becomes a pointerdown. Every
-  // counter so far measures presses the browser chose to deliver as
-  // pointer events, so none of them can see a contact that was consumed
-  // before becoming one -- the last remaining explanation for a stroke
-  // that leaves no trace anywhere.
-  const [contacts, setContacts] = useState(0);
+  // Touch starts are the one signal that survives when a contact never
+  // becomes a pointerdown: every other counter measures presses the
+  // browser chose to deliver as pointer events, so none of them can see
+  // a contact consumed before becoming one.
+  //
+  // Split by touchType. Counting all touches made this useless: a palm
+  // resting on the page raises the total without any pen contact being
+  // lost, so a raw total above the pen-down count proves nothing. Only
+  // stylus contacts are comparable with pen downs; the palm count is
+  // kept because it is worth knowing separately.
+  const [stylusContacts, setStylusContacts] = useState(0);
+  const [otherContacts, setOtherContacts] = useState(0);
   const inkDebug = typeof window !== "undefined" && inkDebugEnabled(window.location.search);
 
   // Inline arrow props are a new function on every render, which would
@@ -121,8 +126,18 @@ export default function PdfViewer({
     };
 
     const countContact = (event: Event) => {
-      const touches = (event as TouchEvent).changedTouches;
-      setContacts((current) => current + (touches ? touches.length : 1));
+      const changed = (event as TouchEvent).changedTouches;
+      if (!changed) return;
+      let stylus = 0;
+      for (let index = 0; index < changed.length; index++) {
+        // touchType is a WebKit extension; Apple Pencil reports
+        // "stylus". Anything else here is a finger or a palm.
+        const touchType = (changed[index] as Touch & { touchType?: string }).touchType;
+        if (touchType === "stylus") stylus += 1;
+      }
+      if (stylus > 0) setStylusContacts((current) => current + stylus);
+      const others = changed.length - stylus;
+      if (others > 0) setOtherContacts((current) => current + others);
     };
 
     const countPenDown = (event: Event) => {
@@ -429,7 +444,8 @@ export default function PdfViewer({
           {inkTally ? `
 ${formatTally(inkTally)}` : ""}
           {`
-pen downs ${penDowns}  contacts ${contacts}  last on ${lastDownTarget || "n/a"}`}
+pen downs ${penDowns}  STYLUS contacts ${stylusContacts}  (palm/finger ${otherContacts})
+last on ${lastDownTarget || "n/a"}`}
         </pre>
       )}
       <div className="pdf-viewer-controls">
