@@ -207,6 +207,19 @@ describe("PaperReader", () => {
     );
   });
 
+  it("treats a write that saved nothing as a failure, not as success", async () => {
+    // createStrokeNote returns null rather than throwing when it refuses
+    // a stroke, so `if (note)` quietly skipped both the state update and
+    // the error path: no note, no message, and the ink gone on reload.
+    createStrokeNoteMock.mockClear();
+    createStrokeNoteMock.mockResolvedValue(null);
+
+    render(<PaperReader fileUrl="/x.pdf" paperId="p1" initialNotes={[]} />);
+    fireEvent.click(screen.getByText("simulate-stroke-complete"));
+
+    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+  });
+
   it("retries a failed stroke save once, so a brief network drop does not cost the stroke", async () => {
     createStrokeNoteMock.mockClear();
     createStrokeNoteMock.mockRejectedValueOnce(new Error("network"));

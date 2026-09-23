@@ -533,7 +533,7 @@ function AnnotationCanvas({
         ...(tool === "highlighter" ? { opacity: HIGHLIGHTER_OPACITY } : {}),
       };
       setPendingStrokes((current) => [...current, stroke]);
-      bumpTally("submitted", false);
+      bumpTally("submitted");
       onStrokeComplete([stroke]);
     }
     if (

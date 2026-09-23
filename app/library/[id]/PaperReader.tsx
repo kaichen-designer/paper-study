@@ -88,9 +88,15 @@ export default function PaperReader({
             pageNumber: currentPage,
             strokes,
           });
-          if (note) {
-            setNotes((current) => [...current, note as Note]);
+          // A null return means nothing was written -- createStrokeNote
+          // refuses a stroke with no points rather than throwing.
+          // Treating that as success was another way to lose ink with no
+          // error and no trace.
+          if (!note) {
+            setStrokeSaveFailed(true);
+            return;
           }
+          setNotes((current) => [...current, note as Note]);
           setStrokeSaveFailed(false);
           return;
         } catch {

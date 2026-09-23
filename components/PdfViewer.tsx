@@ -72,6 +72,13 @@ export default function PdfViewer({
   // nothing, so started == ended-up stays true while strokes go missing.
   const [penDowns, setPenDowns] = useState(0);
   const [lastDownTarget, setLastDownTarget] = useState("");
+  // Touch starts are counted separately because they are the one signal
+  // that survives when a contact never becomes a pointerdown. Every
+  // counter so far measures presses the browser chose to deliver as
+  // pointer events, so none of them can see a contact that was consumed
+  // before becoming one -- the last remaining explanation for a stroke
+  // that leaves no trace anywhere.
+  const [contacts, setContacts] = useState(0);
   const inkDebug = typeof window !== "undefined" && inkDebugEnabled(window.location.search);
 
   // Inline arrow props are a new function on every render, which would
@@ -113,6 +120,11 @@ export default function PdfViewer({
       if (selection && !selection.isCollapsed) selection.removeAllRanges();
     };
 
+    const countContact = (event: Event) => {
+      const touches = (event as TouchEvent).changedTouches;
+      setContacts((current) => current + (touches ? touches.length : 1));
+    };
+
     const countPenDown = (event: Event) => {
       const pointer = event as PointerEvent;
       if (pointer.pointerType !== "pen") return;
@@ -134,12 +146,16 @@ export default function PdfViewer({
     // Capture phase: get ahead of anything that would act on a lingering
     // selection before the stroke has a chance to start.
     document.addEventListener("pointerdown", dropSelection, true);
-    if (inkDebug) document.addEventListener("pointerdown", countPenDown, true);
+    if (inkDebug) {
+      document.addEventListener("pointerdown", countPenDown, true);
+      document.addEventListener("touchstart", countContact, true);
+    }
     return () => {
       document.body.classList.remove(DRAWING_BODY_CLASS);
       document.removeEventListener("selectstart", refuse);
       document.removeEventListener("pointerdown", dropSelection, true);
       document.removeEventListener("pointerdown", countPenDown, true);
+      document.removeEventListener("touchstart", countContact, true);
     };
   }, [penMode, inkDebug]);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -413,7 +429,7 @@ export default function PdfViewer({
           {inkTally ? `
 ${formatTally(inkTally)}` : ""}
           {`
-pen downs at document ${penDowns}  last on ${lastDownTarget || "n/a"}`}
+pen downs ${penDowns}  contacts ${contacts}  last on ${lastDownTarget || "n/a"}`}
         </pre>
       )}
       <div className="pdf-viewer-controls">
