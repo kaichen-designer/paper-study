@@ -54,37 +54,48 @@ export function smoothPathFromPoints(points: { x: number; y: number }[]): string
   return d;
 }
 
-// Keyed on the stroke object itself, so a stroke whose identity survives
-// a re-render is never re-serialized. Entries disappear with the stroke,
-// hence WeakMap rather than a Map that would pin every stroke a reader
-// has ever scrolled past.
-const strokePathCache = new WeakMap<object, { width: number; height: number; d: string }>();
-
 /**
- * Denormalizes a stored stroke to the page's current pixel size and
- * builds its smoothed path, reusing the previous result when the same
- * stroke is asked for again at the same size.
+ * Paints a stored stroke onto a 2D context at the page's current pixel
+ * size, using the same quadratic-midpoint smoothing as
+ * smoothPathFromPoints so canvas and SVG rendering agree.
  *
- * Every saved stroke on the page was otherwise re-serialized on every
- * React render, including the render caused by finishing an unrelated
- * stroke -- so the cost of lifting the pen grew with how much was
- * already drawn on the page.
- *
- * Callers MUST treat a stroke as immutable: the cache is keyed on object
- * identity and will not notice points being mutated in place.
+ * Saved ink is drawn here rather than as SVG paths because a page's
+ * worth of <path> elements is re-rasterized whenever the layer is
+ * invalidated -- measured at roughly 17ms a frame with ~40 strokes,
+ * which scales with how much has been drawn. A bitmap costs the same
+ * whatever it holds.
  */
-export function cachedStrokePath(
-  stroke: { points: { x: number; y: number }[] },
+export function paintStroke(
+  context: {
+    beginPath: () => void;
+    moveTo: (x: number, y: number) => void;
+    lineTo: (x: number, y: number) => void;
+    quadraticCurveTo: (cx: number, cy: number, x: number, y: number) => void;
+    stroke: () => void;
+  },
+  points: { x: number; y: number }[],
   pageWidth: number,
   pageHeight: number
-): string {
-  const cached = strokePathCache.get(stroke);
-  if (cached && cached.width === pageWidth && cached.height === pageHeight) {
-    return cached.d;
+): void {
+  if (points.length === 0) return;
+  const pixels = points.map((point) => denormalizePoint(point, pageWidth, pageHeight));
+
+  context.beginPath();
+  context.moveTo(pixels[0].x, pixels[0].y);
+
+  if (pixels.length === 1) {
+    // A tap. The round line cap turns a zero-length line into a dot.
+    context.lineTo(pixels[0].x, pixels[0].y);
+    context.stroke();
+    return;
   }
-  const d = smoothPathFromPoints(
-    stroke.points.map((point) => denormalizePoint(point, pageWidth, pageHeight))
-  );
-  strokePathCache.set(stroke, { width: pageWidth, height: pageHeight, d });
-  return d;
+
+  for (let i = 1; i < pixels.length - 1; i++) {
+    const midX = (pixels[i].x + pixels[i + 1].x) / 2;
+    const midY = (pixels[i].y + pixels[i + 1].y) / 2;
+    context.quadraticCurveTo(pixels[i].x, pixels[i].y, midX, midY);
+  }
+  const last = pixels[pixels.length - 1];
+  context.lineTo(last.x, last.y);
+  context.stroke();
 }

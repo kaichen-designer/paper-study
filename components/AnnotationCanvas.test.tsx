@@ -138,16 +138,18 @@ describe("AnnotationCanvas", () => {
     expect(polyline.getAttribute("stroke-width")).toBe("2");
   });
 
-  it("renders a saved stroke's own color/width instead of the default when present", () => {
+  it("paints a saved stroke's own color/width instead of the default when present", () => {
+    const { saved } = stubCanvas();
     setupCanvas({
       strokes: [
         { points: [{ x: 0.1, y: 0.1 }, { x: 0.5, y: 0.5 }], color: "#1d4ed8", width: 8 },
       ],
     });
 
-    const polyline = document.querySelector("path") as SVGPathElement;
-    expect(polyline.getAttribute("stroke")).toBe("#1d4ed8");
-    expect(polyline.getAttribute("stroke-width")).toBe("8");
+    const [painted] = paintedStrokes(saved());
+    expect(painted.color).toBe("#1d4ed8");
+    expect(painted.width).toBe(8);
+    vi.restoreAllMocks();
   });
 
   it("with the eraser tool, dragging across an existing stroke calls onEraseStroke with its index", () => {
@@ -185,24 +187,24 @@ describe("AnnotationCanvas", () => {
     expect(onEraseStroke).not.toHaveBeenCalled();
   });
 
-  it("renders existing strokes denormalized to the current width/height", () => {
-    setupCanvas({
-      strokes: [{ points: [{ x: 0.1, y: 0.1 }, { x: 0.5, y: 0.5 }] }],
-    });
+  it("paints existing strokes denormalized to the current width/height", () => {
+    const { saved } = stubCanvas();
+    setupCanvas({ strokes: [{ points: [{ x: 0.1, y: 0.1 }, { x: 0.5, y: 0.5 }] }] });
 
-    const path = document.querySelector("path");
-    expect(path).not.toBeNull();
-    expect(path?.getAttribute("d")).toBe("M 80 60 L 400 300");
+    // 0.1 and 0.5 of an 800x600 page.
+    expect(paintedStrokes(saved())[0].path).toEqual(["moveTo(80,60)", "lineTo(400,300)"]);
+    vi.restoreAllMocks();
   });
 
-  it("still renders previously saved strokes when not interactive (pen mode off), so notes stay visible", () => {
+  it("still paints previously saved strokes when not interactive (pen mode off), so notes stay visible", () => {
+    const { saved } = stubCanvas();
     setupCanvas({
       interactive: false,
       strokes: [{ points: [{ x: 0.1, y: 0.1 }, { x: 0.5, y: 0.5 }] }],
     });
 
-    const path = document.querySelector("path");
-    expect(path?.getAttribute("d")).toBe("M 80 60 L 400 300");
+    expect(paintedStrokes(saved())[0].path).toEqual(["moveTo(80,60)", "lineTo(400,300)"]);
+    vi.restoreAllMocks();
   });
 
   it("does not capture pointer input when not interactive, so scroll/zoom gestures reach the page underneath", () => {
@@ -343,30 +345,31 @@ describe("AnnotationCanvas", () => {
   });
 
   it("keeps saved ink in a separate layer that takes no pointer input at all", () => {
+    const { saved } = stubCanvas();
     const { surface } = setupCanvas({
       strokes: [{ points: [{ x: 0.1, y: 0.1 }, { x: 0.9, y: 0.9 }] }],
     });
 
     const savedLayer = screen.getByTestId("annotation-saved-layer");
-    // Structurally separate, so a stroke's <path> can never be the
-    // pointer target -- and so rewriting the live stroke every frame
-    // does not drag the saved ink through the repaint with it.
+    // A bitmap, structurally separate from the input surface: nothing in
+    // it can become a pointer target, and its cost does not grow with
+    // how much has been drawn.
+    expect(savedLayer.tagName).toBe("CANVAS");
     expect(savedLayer.contains(surface)).toBe(false);
     expect(surface.contains(savedLayer)).toBe(false);
     expect(savedLayer.style.pointerEvents).toBe("none");
-    expect(savedLayer.querySelectorAll("path").length).toBe(1);
+    expect(paintedStrokes(saved())).toHaveLength(1);
+    vi.restoreAllMocks();
   });
 
-  it("does not let saved or pending strokes take pointer input away from the surface", () => {
+  it("leaves no per-stroke elements for the browser to hit-test or re-rasterize", () => {
+    stubCanvas();
     setupCanvas({ strokes: [{ points: [{ x: 0.1, y: 0.1 }, { x: 0.9, y: 0.9 }] }] });
 
-    const strokePaths = [...document.querySelectorAll("path")].filter(
-      (path) => path.getAttribute("data-testid") !== "annotation-live-stroke"
-    );
-    expect(strokePaths.length).toBeGreaterThan(0);
-    for (const path of strokePaths) {
-      expect(path.style.pointerEvents).toBe("none");
-    }
+    // Saved ink used to be one <path> per stroke, each hit-tested
+    // against every pointer event and re-rasterized with its layer.
+    expect(screen.getByTestId("annotation-saved-layer").children).toHaveLength(0);
+    vi.restoreAllMocks();
   });
 
   it("draws the browser's predicted points ahead of the pen but never saves them", async () => {
@@ -425,35 +428,41 @@ describe("AnnotationCanvas", () => {
   });
 
   it("keeps the just-finished stroke visible immediately on pointer-up, before the parent's strokes prop has caught up (no disappear/reappear flicker while the save round-trips)", () => {
+    const { saved } = stubCanvas();
     const { surface } = setupCanvas();
 
     fireEvent.pointerDown(surface, { clientX: 80, clientY: 60, pointerType: "pen" });
     fireEvent.pointerMove(surface, { clientX: 400, clientY: 300, pointerType: "pen" });
     fireEvent.pointerUp(surface, { clientX: 400, clientY: 300, pointerType: "pen" });
 
-    // `strokes` prop is still [] at this point (the parent hasn't
-    // persisted/echoed it back yet) — the finished stroke must still be
-    // painted somewhere.
-    const visiblePaths = [...document.querySelectorAll("path")].map((el) => el.getAttribute("d"));
-    expect(visiblePaths).toContain("M 80 60 L 400 300");
+    // The strokes prop is still [] here (the parent has not persisted
+    // and echoed it back yet), so the finished stroke has to be painted
+    // from the optimistic copy or it would flicker away.
+    const paths = paintedStrokes(saved()).map((stroke) => stroke.path.join(" "));
+    expect(paths).toContain("moveTo(80,60) lineTo(400,300)");
+    vi.restoreAllMocks();
   });
 
-  it("drops the optimistic copy once the parent's strokes prop actually includes the saved stroke, instead of rendering it twice", () => {
+  it("drops the optimistic copy once the parent's strokes prop actually includes the saved stroke, instead of painting it twice", () => {
+    const { saved, calls } = stubCanvas();
     const { surface, rerenderWith } = setupCanvas();
 
     fireEvent.pointerDown(surface, { clientX: 80, clientY: 60, pointerType: "pen" });
     fireEvent.pointerMove(surface, { clientX: 400, clientY: 300, pointerType: "pen" });
     fireEvent.pointerUp(surface, { clientX: 400, clientY: 300, pointerType: "pen" });
 
+    calls.length = 0;
     rerenderWith({ strokes: [{ points: [{ x: 0.1, y: 0.1 }, { x: 0.5, y: 0.5 }] }] });
 
-    const matching = [...document.querySelectorAll("path")].filter(
-      (el) => el.getAttribute("d") === "M 80 60 L 400 300"
+    const matching = paintedStrokes(saved()).filter(
+      (stroke) => stroke.path.join(" ") === "moveTo(80,60) lineTo(400,300)"
     );
     expect(matching).toHaveLength(1);
+    vi.restoreAllMocks();
   });
 
   it("keeps a second stroke visible when it's still pending while only the first stroke's save has round-tripped (writing quickly, one stroke per save)", () => {
+    const { saved, calls } = stubCanvas();
     const { surface, rerenderWith } = setupCanvas();
 
     // First stroke.
@@ -461,18 +470,20 @@ describe("AnnotationCanvas", () => {
     fireEvent.pointerMove(surface, { clientX: 400, clientY: 300, pointerType: "pen" });
     fireEvent.pointerUp(surface, { clientX: 400, clientY: 300, pointerType: "pen" });
 
-    // Second stroke, drawn immediately after — before the first stroke's
-    // save has resolved and updated the `strokes` prop.
+    // Second stroke, drawn immediately after -- before the first
+    // stroke's save has resolved and updated the strokes prop.
     fireEvent.pointerDown(surface, { clientX: 100, clientY: 100, pointerType: "pen" });
     fireEvent.pointerMove(surface, { clientX: 200, clientY: 200, pointerType: "pen" });
     fireEvent.pointerUp(surface, { clientX: 200, clientY: 200, pointerType: "pen" });
 
-    // Now only the FIRST stroke's save resolves and reaches the strokes
-    // prop — the second one is still in flight.
+    // Only the FIRST stroke's save resolves and reaches the prop; the
+    // second is still in flight and must stay on screen.
+    calls.length = 0;
     rerenderWith({ strokes: [{ points: [{ x: 0.1, y: 0.1 }, { x: 0.5, y: 0.5 }] }] });
 
-    const visiblePaths = [...document.querySelectorAll("path")].map((el) => el.getAttribute("d"));
-    expect(visiblePaths).toContain("M 100 100 L 200 200");
+    const paths = paintedStrokes(saved()).map((stroke) => stroke.path.join(" "));
+    expect(paths).toContain("moveTo(100,100) lineTo(200,200)");
+    vi.restoreAllMocks();
   });
 
   it("with the highlighter tool, drawing saves a translucent stroke", () => {
@@ -554,13 +565,14 @@ describe("AnnotationCanvas", () => {
     expect(cursor.getAttribute("opacity")).toBe("0");
   });
 
-  it("renders a saved highlighter stroke with reduced stroke-opacity", () => {
+  it("paints a saved highlighter stroke at reduced opacity", () => {
+    const { saved } = stubCanvas();
     setupCanvas({
       strokes: [{ points: [{ x: 0.1, y: 0.1 }, { x: 0.5, y: 0.5 }], opacity: 0.35 }],
     });
 
-    const polyline = document.querySelector("path") as SVGPathElement;
-    expect(polyline.getAttribute("stroke-opacity")).toBe("0.35");
+    expect(paintedStrokes(saved())[0].alpha).toBe(0.35);
+    vi.restoreAllMocks();
   });
 
   it("renders a saved pen stroke (no opacity field) fully opaque", () => {
@@ -611,27 +623,80 @@ describe("AnnotationCanvas", () => {
     expect(latest?.[0].touchWhileDrawing ?? 0).toBe(0);
   });
 
-  type Recorded = { op: string; args: number[] };
+  type Recorded = { layer: string; op: string; args: number[]; value?: unknown };
 
+  /**
+   * Records what is painted, per layer. Both the saved ink and the live
+   * stroke are canvases now, so a test has to be able to say which one
+   * it means.
+   */
   function stubCanvas() {
     const calls: Recorded[] = [];
-    const record = (op: string) => (...args: number[]) => calls.push({ op, args });
-    const context = {
-      setTransform: record("setTransform"),
-      clearRect: record("clearRect"),
-      beginPath: record("beginPath"),
-      moveTo: record("moveTo"),
-      quadraticCurveTo: record("quadraticCurveTo"),
-      stroke: record("stroke"),
-      strokeStyle: "",
-      lineWidth: 0,
-      lineCap: "",
-      lineJoin: "",
-    };
-    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(
-      context as unknown as CanvasRenderingContext2D
-    );
-    return { calls, context };
+    const contexts = new Map<HTMLCanvasElement, unknown>();
+
+    function make(layer: string) {
+      const context: Record<string, unknown> = {};
+      for (const op of [
+        "setTransform",
+        "clearRect",
+        "beginPath",
+        "moveTo",
+        "lineTo",
+        "quadraticCurveTo",
+        "stroke",
+      ]) {
+        context[op] = (...args: number[]) => calls.push({ layer, op, args });
+      }
+      for (const prop of ["strokeStyle", "lineWidth", "globalAlpha", "lineCap", "lineJoin"]) {
+        let held: unknown;
+        Object.defineProperty(context, prop, {
+          get: () => held,
+          set: (value) => {
+            held = value;
+            calls.push({ layer, op: `set:${prop}`, args: [], value });
+          },
+        });
+      }
+      return context;
+    }
+
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(function (
+      this: HTMLCanvasElement
+    ) {
+      if (!contexts.has(this)) {
+        contexts.set(this, make(this.getAttribute("data-testid") ?? "unknown"));
+      }
+      return contexts.get(this) as CanvasRenderingContext2D;
+    });
+
+    const saved = () => calls.filter((call) => call.layer === "annotation-saved-layer");
+    const live = () => calls.filter((call) => call.layer === "annotation-live-canvas");
+    return { calls, saved, live };
+  }
+
+  type Painted = { color?: unknown; width?: unknown; alpha?: unknown; path: string[] };
+
+  /** Groups a layer's recorded ops back into the strokes they drew. */
+  function paintedStrokes(calls: Recorded[]): Painted[] {
+    const out: Painted[] = [];
+    let color: unknown;
+    let strokeWidth: unknown;
+    let alpha: unknown;
+    let current: Painted | null = null;
+    for (const call of calls) {
+      if (call.op === "set:strokeStyle") color = call.value;
+      if (call.op === "set:lineWidth") strokeWidth = call.value;
+      if (call.op === "set:globalAlpha") alpha = call.value;
+      if (call.op === "beginPath") current = { color, width: strokeWidth, alpha, path: [] };
+      if (current && ["moveTo", "lineTo", "quadraticCurveTo"].includes(call.op)) {
+        current.path.push(call.op + "(" + call.args.join(",") + ")");
+      }
+      if (call.op === "stroke" && current) {
+        out.push(current);
+        current = null;
+      }
+    }
+    return out;
   }
 
   function penMove(surface: Element, x: number, y: number) {
@@ -648,7 +713,7 @@ describe("AnnotationCanvas", () => {
   }
 
   it("paints settled segments onto the canvas and leaves only a short tail in SVG", async () => {
-    const { calls } = stubCanvas();
+    const { live } = stubCanvas();
     const { surface } = setupCanvas();
 
     fireEvent.pointerDown(surface, { clientX: 0, clientY: 0, pointerType: "pen" });
@@ -657,7 +722,7 @@ describe("AnnotationCanvas", () => {
     penMove(surface, 300, 0);
     await nextFrame();
 
-    const curves = calls.filter((call) => call.op === "quadraticCurveTo");
+    const curves = live().filter((call) => call.op === "quadraticCurveTo");
     // Points 0..3: the curves through points 1 and 2 are final once the
     // next point exists, so both are painted; point 3 is still moving.
     expect(curves).toHaveLength(2);
@@ -675,19 +740,19 @@ describe("AnnotationCanvas", () => {
   });
 
   it("does not repaint settled segments as the stroke grows", async () => {
-    const { calls } = stubCanvas();
+    const { live } = stubCanvas();
     const { surface } = setupCanvas();
 
     fireEvent.pointerDown(surface, { clientX: 0, clientY: 0, pointerType: "pen" });
     penMove(surface, 100, 0);
     penMove(surface, 200, 0);
     await nextFrame();
-    const afterFirst = calls.filter((c) => c.op === "quadraticCurveTo").length;
+    const afterFirst = live().filter((c) => c.op === "quadraticCurveTo").length;
 
     penMove(surface, 300, 0);
     penMove(surface, 400, 0);
     await nextFrame();
-    const afterSecond = calls.filter((c) => c.op === "quadraticCurveTo").length;
+    const afterSecond = live().filter((c) => c.op === "quadraticCurveTo").length;
 
     // Two more points, two more curves -- not a redraw of everything so
     // far. Cost per frame stays flat instead of growing with the stroke.
@@ -697,7 +762,7 @@ describe("AnnotationCanvas", () => {
   });
 
   it("clears the canvas when a stroke ends, so it cannot bleed into the next one", async () => {
-    const { calls } = stubCanvas();
+    const { calls, live } = stubCanvas();
     const { surface } = setupCanvas();
 
     fireEvent.pointerDown(surface, { clientX: 0, clientY: 0, pointerType: "pen" });
@@ -707,7 +772,7 @@ describe("AnnotationCanvas", () => {
 
     fireEvent.pointerUp(surface, { clientX: 100, clientY: 50, pointerType: "pen" });
 
-    expect(calls.some((call) => call.op === "clearRect")).toBe(true);
+    expect(live().some((call) => call.op === "clearRect")).toBe(true);
     vi.restoreAllMocks();
   });
 
@@ -745,19 +810,18 @@ describe("AnnotationCanvas", () => {
   });
 
   it("takes on ink that arrived mid-stroke once the pen lifts", () => {
+    const { saved, calls } = stubCanvas();
     const { surface, rerenderWith } = setupCanvas();
 
     fireEvent.pointerDown(surface, { clientX: 10, clientY: 10, pointerType: "pen" });
     rerenderWith({ strokes: [{ points: [{ x: 0.1, y: 0.1 }, { x: 0.5, y: 0.5 }] }] });
+    calls.length = 0;
     fireEvent.pointerUp(surface, { clientX: 20, clientY: 20, pointerType: "pen" });
 
-    // Deferred, not dropped. The lift also leaves this gesture's own
-    // optimistic mark behind, so look for the deferred stroke itself
-    // rather than counting paths.
-    const drawn = [...screen.getByTestId("annotation-saved-layer").querySelectorAll("path")].map(
-      (path) => path.getAttribute("d")
-    );
-    expect(drawn).toContain("M 80 60 L 400 300");
+    // Deferred, not dropped.
+    const paths = paintedStrokes(saved()).map((stroke) => stroke.path.join(" "));
+    expect(paths).toContain("moveTo(80,60) lineTo(400,300)");
+    vi.restoreAllMocks();
   });
 
   it("does not report the render count on every render, which would be a render loop", () => {
@@ -781,7 +845,7 @@ describe("AnnotationCanvas", () => {
   });
 
   it("does not resize the canvas mid-stroke, which would wipe the ink being drawn", async () => {
-    const { calls } = stubCanvas();
+    const { calls, live } = stubCanvas();
     const { surface, rerenderWith } = setupCanvas();
 
     fireEvent.pointerDown(surface, { clientX: 0, clientY: 0, pointerType: "pen" });
@@ -802,9 +866,9 @@ describe("AnnotationCanvas", () => {
     await nextFrame();
 
     expect(canvas.width).toBe(widthBefore);
-    expect(calls.some((call) => call.op === "clearRect")).toBe(false);
+    expect(live().some((call) => call.op === "clearRect")).toBe(false);
     // Still drawing, not stalled.
-    expect(calls.some((call) => call.op === "quadraticCurveTo")).toBe(true);
+    expect(live().some((call) => call.op === "quadraticCurveTo")).toBe(true);
 
     vi.restoreAllMocks();
   });

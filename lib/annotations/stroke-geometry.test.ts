@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  cachedStrokePath,
   denormalizePoint,
+  paintStroke,
   normalizePoint,
   smoothPathFromPoints,
 } from "./stroke-geometry";
@@ -74,37 +74,58 @@ describe("smoothPathFromPoints", () => {
   });
 });
 
-describe("cachedStrokePath", () => {
-  it("matches an uncached denormalize-then-smooth for the same stroke", () => {
-    const stroke = { points: [{ x: 0.1, y: 0.1 }, { x: 0.5, y: 0.5 }] };
-    const expected = smoothPathFromPoints(
-      stroke.points.map((p) => denormalizePoint(p, 800, 600))
+describe("paintStroke", () => {
+  function recorder() {
+    const ops: string[] = [];
+    const push = (op: string) => (...args: number[]) => ops.push(op + "(" + args.join(",") + ")");
+    return {
+      ops,
+      context: {
+        beginPath: push("beginPath"),
+        moveTo: push("moveTo"),
+        lineTo: push("lineTo"),
+        quadraticCurveTo: push("quadraticCurveTo"),
+        stroke: push("stroke"),
+      },
+    };
+  }
+
+  it("draws nothing for an empty stroke", () => {
+    const { ops, context } = recorder();
+    paintStroke(context, [], 800, 600);
+    expect(ops).toEqual([]);
+  });
+
+  it("draws a single point as a dot, which the round cap renders", () => {
+    const { ops, context } = recorder();
+    paintStroke(context, [{ x: 0.5, y: 0.5 }], 800, 600);
+    expect(ops).toEqual([
+      "beginPath()",
+      "moveTo(400,300)",
+      "lineTo(400,300)",
+      "stroke()",
+    ]);
+  });
+
+  it("matches smoothPathFromPoints, so canvas and SVG agree", () => {
+    const points = [
+      { x: 0, y: 0 },
+      { x: 0.5, y: 0 },
+      { x: 1, y: 0.5 },
+    ];
+    const { ops, context } = recorder();
+    paintStroke(context, points, 100, 100);
+
+    // Same control points and midpoints as the SVG path builder.
+    expect(smoothPathFromPoints(points.map((p) => denormalizePoint(p, 100, 100)))).toBe(
+      "M 0 0 Q 50 0 75 25 L 100 50"
     );
-    expect(cachedStrokePath(stroke, 800, 600)).toBe(expected);
-  });
-
-  it("reuses the previous result for the same stroke at the same size", () => {
-    const stroke = { points: [{ x: 0.1, y: 0.1 }, { x: 0.5, y: 0.5 }] };
-    const first = cachedStrokePath(stroke, 800, 600);
-    // Mutating in place is exactly what callers are told not to do; the
-    // stale result proves the second call did no work.
-    stroke.points[1] = { x: 0.9, y: 0.9 };
-    expect(cachedStrokePath(stroke, 800, 600)).toBe(first);
-  });
-
-  it("recomputes when the page is rendered at a different size", () => {
-    const stroke = { points: [{ x: 0.1, y: 0.1 }, { x: 0.5, y: 0.5 }] };
-    const atSmall = cachedStrokePath(stroke, 800, 600);
-    const atLarge = cachedStrokePath(stroke, 1600, 1200);
-    expect(atLarge).not.toBe(atSmall);
-    expect(atLarge).toBe(
-      smoothPathFromPoints(stroke.points.map((p) => denormalizePoint(p, 1600, 1200)))
-    );
-  });
-
-  it("keeps separate entries per stroke", () => {
-    const a = { points: [{ x: 0, y: 0 }, { x: 0.5, y: 0.5 }] };
-    const b = { points: [{ x: 0.5, y: 0.5 }, { x: 1, y: 1 }] };
-    expect(cachedStrokePath(a, 800, 600)).not.toBe(cachedStrokePath(b, 800, 600));
+    expect(ops).toEqual([
+      "beginPath()",
+      "moveTo(0,0)",
+      "quadraticCurveTo(50,0,75,25)",
+      "lineTo(100,50)",
+      "stroke()",
+    ]);
   });
 });

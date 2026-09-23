@@ -2,8 +2,8 @@
 
 import { memo, useEffect, useRef, useState } from "react";
 import {
-  cachedStrokePath,
   denormalizePoint,
+  paintStroke,
   normalizePoint,
   smoothPathFromPoints,
   type Point,
@@ -125,6 +125,7 @@ function AnnotationCanvas({
   const predictedRef = useRef<Point[]>([]);
   const tallyRef = useRef<InkTally>(emptyTally());
   const liveCanvasRef = useRef<HTMLCanvasElement>(null);
+  const savedCanvasRef = useRef<HTMLCanvasElement>(null);
   // How much of the live stroke is already painted onto the canvas, and
   // where that painted path ends. Everything before this index is
   // settled and never redrawn.
@@ -189,13 +190,70 @@ function AnnotationCanvas({
     previousPropsRef.current = current;
   });
 
+  // Sizing lives here rather than on the drawing path: assigning a
+  // canvas dimension clears it, so it must never happen mid-stroke, and
+  // the drawing path only runs while the pen is down.
+  function sizeLiveCanvas() {
+    const canvas = liveCanvasRef.current;
+    if (!canvas) return;
+    // Never while the pen is down: assigning a dimension clears the
+    // canvas, and the page's measured size can shift under a re-render
+    // mid-stroke, wiping the ink being drawn.
+    if (drawingPointsRef.current.length > 0) return;
+    const ratio = window.devicePixelRatio || 1;
+    const pixelWidth = Math.round(width * ratio);
+    const pixelHeight = Math.round(height * ratio);
+    if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+      canvas.width = pixelWidth;
+      canvas.height = pixelHeight;
+    }
+  }
+
+  useEffect(sizeLiveCanvas, [width, height]);
+
+  // Repaints the whole saved layer. Only runs when the ink or the page
+  // size actually changes -- and settledStrokes is held steady while the
+  // pen is down, so this never lands mid-stroke.
+  useEffect(() => {
+    const canvas = savedCanvasRef.current;
+    const context = canvas?.getContext?.("2d");
+    if (!canvas || !context) return;
+
+    const ratio = window.devicePixelRatio || 1;
+    const pixelWidth = Math.round(width * ratio);
+    const pixelHeight = Math.round(height * ratio);
+    if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+      canvas.width = pixelWidth;
+      canvas.height = pixelHeight;
+    }
+    context.setTransform(1, 0, 0, 1, 0, 0);
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.setTransform(ratio, 0, 0, ratio, 0, 0);
+    context.lineCap = "round";
+    context.lineJoin = "round";
+
+    for (const stroke of [...settledStrokes, ...pendingStrokes]) {
+      context.strokeStyle = stroke.color ?? DEFAULT_STROKE_COLOR;
+      context.lineWidth = stroke.width ?? DEFAULT_STROKE_WIDTH;
+      context.globalAlpha = stroke.opacity ?? DEFAULT_STROKE_OPACITY;
+      paintStroke(context, stroke.points, width, height);
+    }
+    context.globalAlpha = 1;
+  }, [settledStrokes, pendingStrokes, width, height]);
+
   // Drop only the pending strokes that have actually appeared in the
   // parent's `strokes` prop — not the whole buffer, since other strokes
   // drawn in quick succession may still be mid-save.
   useEffect(() => {
-    setPendingStrokes((current) =>
-      current.filter((pending) => !strokes.some((saved) => strokesEqual(pending, saved)))
-    );
+    setPendingStrokes((current) => {
+      const remaining = current.filter(
+        (pending) => !strokes.some((saved) => strokesEqual(pending, saved))
+      );
+      // filter() always returns a new array, and a new identity here
+      // costs a render plus a full repaint of the saved layer even when
+      // nothing was actually dropped.
+      return remaining.length === current.length ? current : remaining;
+    });
   }, [strokes]);
 
   useEffect(() => {
@@ -289,16 +347,12 @@ function AnnotationCanvas({
     const ratio = window.devicePixelRatio || 1;
     const pixelWidth = Math.round(width * ratio);
     const pixelHeight = Math.round(height * ratio);
-    // Assigning either dimension CLEARS the canvas. The page's measured
-    // size can change under a parent re-render, and doing that mid-stroke
-    // wipes the ink drawn so far, leaving only the two-point SVG tail --
-    // the stroke visibly vanishes while it is being drawn. Never resize
-    // while the pen is down; the next stroke picks up the new size.
-    const drawing = drawingPointsRef.current.length > 0;
-    if (!drawing && (canvas.width !== pixelWidth || canvas.height !== pixelHeight)) {
-      canvas.width = pixelWidth;
-      canvas.height = pixelHeight;
-    }
+    // Deliberately does NOT resize. Assigning either dimension clears the
+    // canvas, and the page's measured size can shift under a re-render
+    // mid-stroke, which would wipe the ink being drawn. Sizing happens in
+    // an effect instead, between strokes.
+    void pixelWidth;
+    void pixelHeight;
     const context = canvas.getContext("2d");
     if (!context) return null;
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
@@ -511,8 +565,10 @@ function AnnotationCanvas({
     clearLiveCanvas();
 
     // Pen is off the page: safe to take on whatever arrived while it was
-    // down, now that doing so cannot cost a frame mid-gesture.
+    // down, now that doing so cannot cost a frame mid-gesture, and to
+    // apply a page size that changed while it was.
     setSettledStrokes(latestStrokesRef.current);
+    sizeLiveCanvas();
     liveStrokeRef.current?.setAttribute("d", "");
     hideEraserCursor();
 
@@ -544,10 +600,6 @@ function AnnotationCanvas({
     finishDrawing();
   }
 
-  function toSmoothPath(stroke: Stroke): string {
-    return cachedStrokePath(stroke, width, height);
-  }
-
   return (
     // Two stacked layers on purpose. The live stroke is rewritten every
     // frame while the saved ink changes only when a stroke finishes, and
@@ -558,39 +610,18 @@ function AnnotationCanvas({
     // out. Split, the live layer repaints alone and the saved layer is
     // left composited.
     <div style={{ position: "relative", width, height }}>
-      <svg
+      <canvas
+        ref={savedCanvasRef}
         data-testid="annotation-saved-layer"
-        width={width}
-        height={height}
-        style={{ position: "absolute", top: 0, left: 0, pointerEvents: "none" }}
-      >
-        {settledStrokes.map((stroke, index) => (
-          <path
-            key={`saved-${index}`}
-            d={toSmoothPath(stroke)}
-            style={{ pointerEvents: "none" }}
-            fill="none"
-            stroke={stroke.color ?? DEFAULT_STROKE_COLOR}
-            strokeWidth={stroke.width ?? DEFAULT_STROKE_WIDTH}
-            strokeOpacity={stroke.opacity ?? DEFAULT_STROKE_OPACITY}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        ))}
-        {pendingStrokes.map((stroke, index) => (
-          <path
-            key={`pending-${index}`}
-            d={toSmoothPath(stroke)}
-            style={{ pointerEvents: "none" }}
-            fill="none"
-            stroke={stroke.color ?? DEFAULT_STROKE_COLOR}
-            strokeWidth={stroke.width ?? DEFAULT_STROKE_WIDTH}
-            strokeOpacity={stroke.opacity ?? DEFAULT_STROKE_OPACITY}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        ))}
-      </svg>
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          width,
+          height,
+          pointerEvents: "none",
+        }}
+      />
       <canvas
         ref={liveCanvasRef}
         data-testid="annotation-live-canvas"
