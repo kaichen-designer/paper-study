@@ -18,6 +18,8 @@ export type Paper = {
   finished_reading: boolean;
   finished_at: string | null;
   imported_to_detabase: boolean;
+  reading_stage: "up_next" | "reading" | "finished";
+  deleted_at: string | null;
 };
 
 export type InsertPaperInput = {
@@ -41,6 +43,7 @@ export async function listPapers(supabase: SupabaseClient): Promise<Paper[]> {
   const { data, error } = await supabase
     .from("papers")
     .select("*")
+    .is("deleted_at", null)
     .order("uploaded_at", { ascending: false });
 
   if (error) {
@@ -98,4 +101,130 @@ export async function insertPaper(
   }
 
   return data as Paper;
+}
+
+/**
+ * Renames a paper.
+ *
+ * A title of only whitespace is rejected rather than stored: the library
+ * would render an unlabelled, unidentifiable card, and the upload flow
+ * guarantees a non-empty title, so nothing should be able to produce one.
+ *
+ * Access-scoping note: no `userId` parameter; the `papers_update_own` RLS
+ * policy scopes the row. `.select().single()` makes a zero-row match an
+ * error rather than a silent no-op.
+ */
+export async function renamePaper(
+  supabase: SupabaseClient,
+  paperId: string,
+  title: string
+): Promise<Paper> {
+  const trimmed = title.trim();
+  if (trimmed.length === 0) {
+    throw new Error("Cannot rename a paper to an empty title.");
+  }
+
+  const { data, error } = await supabase
+    .from("papers")
+    .update({ title: trimmed })
+    .eq("id", paperId)
+    .select()
+    .single();
+
+  if (error) {
+    throw new Error(`Failed to rename paper: ${error.message}`);
+  }
+
+  return data as Paper;
+}
+
+/**
+ * Removes a paper from the library without destroying it.
+ *
+ * A timestamp rather than a boolean: it answers both "is this removed"
+ * and "when", which is what the trash orders by, and leaves room for a
+ * retention policy without another schema change.
+ */
+export async function softDeletePaper(supabase: SupabaseClient, paperId: string): Promise<void> {
+  const { error } = await supabase
+    .from("papers")
+    .update({ deleted_at: new Date().toISOString() })
+    .eq("id", paperId)
+    .select()
+    .single();
+
+  if (error) {
+    throw new Error(`Failed to remove paper: ${error.message}`);
+  }
+}
+
+/** Returns a removed paper to the library, under the stage it had before. */
+export async function restorePaper(supabase: SupabaseClient, paperId: string): Promise<void> {
+  const { error } = await supabase
+    .from("papers")
+    .update({ deleted_at: null })
+    .eq("id", paperId)
+    .select()
+    .single();
+
+  if (error) {
+    throw new Error(`Failed to restore paper: ${error.message}`);
+  }
+}
+
+/** Lists removed papers for the trash view, most recently removed first. */
+export async function listDeletedPapers(supabase: SupabaseClient): Promise<Paper[]> {
+  const { data, error } = await supabase
+    .from("papers")
+    .select("*")
+    .not("deleted_at", "is", null)
+    .order("deleted_at", { ascending: false });
+
+  if (error) {
+    throw new Error(`Failed to list removed papers: ${error.message}`);
+  }
+
+  return (data ?? []) as Paper[];
+}
+
+/**
+ * Permanently deletes a paper, its notes, annotations and reflection
+ * messages (by `on delete cascade`), and its stored PDF.
+ *
+ * Order matters and is deliberate: the row goes first, then the file on
+ * a best-effort basis. Doing it the other way round risks leaving a row
+ * whose file is gone — a paper in the library that cannot be opened.
+ * This way the worst case is an orphaned file: wasted space that shows
+ * up nowhere and can be swept later. Auditable waste beats broken state.
+ *
+ * Access-scoping note: no `userId` parameter; the `papers_delete_own` RLS
+ * policy scopes the row. `.select().single()` makes a zero-row match an
+ * error rather than a silent no-op.
+ *
+ * Guarded at the data layer, not just the UI, so a paper that isn't in
+ * the trash cannot be destroyed even if a stale card believes it is
+ * (props lag a server round trip — see IMPORTANT 4). The delete only
+ * matches a row whose `deleted_at` is set; a paper restored moments
+ * earlier no longer matches, so `.single()` sees zero rows and this
+ * throws instead of destroying it.
+ */
+export async function purgePaper(
+  supabase: SupabaseClient,
+  paper: Pick<Paper, "id" | "storage_path">
+): Promise<void> {
+  const { error } = await supabase
+    .from("papers")
+    .delete()
+    .eq("id", paper.id)
+    .not("deleted_at", "is", null)
+    .select()
+    .single();
+
+  if (error) {
+    throw new Error(`Failed to delete paper: ${error.message}`);
+  }
+
+  // Best effort: a failure here leaves an orphaned file, which is
+  // preferable to reporting a failure for a deletion that did happen.
+  await supabase.storage.from("papers").remove([paper.storage_path]);
 }

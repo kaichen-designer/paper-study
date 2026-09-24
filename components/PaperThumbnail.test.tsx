@@ -44,4 +44,16 @@ describe("PaperThumbnail", () => {
       "/icon-192.png"
     );
   });
+
+  // IMPORTANT 8: a null fileUrl (the signed-URL request itself failed,
+  // e.g. a missing storage object) must go straight to the same fallback
+  // as a load failure, rather than handing react-pdf nothing to load.
+  it("falls back to the app icon when there is no file URL at all", () => {
+    render(<PaperThumbnail fileUrl={null} />);
+    expect(screen.queryByTestId("page")).not.toBeInTheDocument();
+    expect(screen.getByTestId("paper-thumbnail-fallback")).toHaveAttribute(
+      "src",
+      "/icon-192.png"
+    );
+  });
 });

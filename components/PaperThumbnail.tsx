@@ -13,10 +13,13 @@ const THUMBNAIL_WIDTH = 160;
  * loaded (e.g. an expired signed URL or a corrupt file) so one broken paper
  * never breaks the whole grid.
  */
-export default function PaperThumbnail({ fileUrl }: { fileUrl: string }) {
+export default function PaperThumbnail({ fileUrl }: { fileUrl: string | null }) {
   const [failed, setFailed] = useState(false);
 
-  if (failed) {
+  // A null fileUrl means the signed URL request itself failed (e.g. the
+  // stored object is missing) — there is nothing to hand react-pdf, so
+  // go straight to the same fallback used for a load failure (IMPORTANT 8).
+  if (failed || fileUrl === null) {
     return (
       <img
         src="/icon-192.png"

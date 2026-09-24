@@ -17,6 +17,38 @@ create table if not exists papers (
 
 create index if not exists papers_user_id_idx on papers (user_id);
 
+-- Reading stage. Three-valued rather than two booleans so that an
+-- impossible combination cannot be represented at all. `finished_reading`
+-- and `finished_at` are kept for the existing reading-completion flow and
+-- are written only by setReadingStage, so the two can never disagree.
+alter table papers
+  add column if not exists reading_stage text not null default 'up_next';
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'papers_reading_stage_check'
+  ) then
+    alter table papers
+      add constraint papers_reading_stage_check
+      check (reading_stage in ('up_next', 'reading', 'finished'));
+  end if;
+end $$;
+
+-- Backfill: a paper already marked finished belongs in the finished
+-- stage; everything else starts in up_next.
+update papers set reading_stage = 'finished'
+  where finished_reading = true and reading_stage <> 'finished';
+
+-- Soft delete. A timestamp rather than a boolean, so it answers both
+-- "is this removed" and "when was it removed" — the trash lists by
+-- removal time, and a retention policy later needs no schema change.
+alter table papers
+  add column if not exists deleted_at timestamptz;
+
+create index if not exists papers_user_deleted_idx
+  on papers (user_id, deleted_at);
+
 create table if not exists notes (
   id uuid primary key default gen_random_uuid(),
   paper_id uuid not null references papers (id) on delete cascade,
@@ -78,31 +110,43 @@ alter table notes enable row level security;
 alter table translation_cache enable row level security;
 alter table reflection_messages enable row level security;
 
+drop policy if exists "papers_select_own" on papers;
 create policy "papers_select_own" on papers
   for select using (auth.uid() = user_id);
+drop policy if exists "papers_insert_own" on papers;
 create policy "papers_insert_own" on papers
   for insert with check (auth.uid() = user_id);
+drop policy if exists "papers_update_own" on papers;
 create policy "papers_update_own" on papers
   for update using (auth.uid() = user_id);
+drop policy if exists "papers_delete_own" on papers;
 create policy "papers_delete_own" on papers
   for delete using (auth.uid() = user_id);
 
+drop policy if exists "notes_select_own" on notes;
 create policy "notes_select_own" on notes
   for select using (auth.uid() = user_id);
+drop policy if exists "notes_insert_own" on notes;
 create policy "notes_insert_own" on notes
   for insert with check (auth.uid() = user_id);
+drop policy if exists "notes_update_own" on notes;
 create policy "notes_update_own" on notes
   for update using (auth.uid() = user_id);
+drop policy if exists "notes_delete_own" on notes;
 create policy "notes_delete_own" on notes
   for delete using (auth.uid() = user_id);
 
+drop policy if exists "translation_cache_select_authenticated" on translation_cache;
 create policy "translation_cache_select_authenticated" on translation_cache
   for select using (auth.role() = 'authenticated');
+drop policy if exists "translation_cache_insert_authenticated" on translation_cache;
 create policy "translation_cache_insert_authenticated" on translation_cache
   for insert with check (auth.role() = 'authenticated');
 
+drop policy if exists "reflection_messages_select_own" on reflection_messages;
 create policy "reflection_messages_select_own" on reflection_messages
   for select using (auth.uid() = user_id);
+drop policy if exists "reflection_messages_insert_own" on reflection_messages;
 create policy "reflection_messages_insert_own" on reflection_messages
   for insert with check (auth.uid() = user_id);
 
@@ -112,18 +156,21 @@ create policy "reflection_messages_insert_own" on reflection_messages
 -- here to each user's own path prefix ("${userId}/...", set by
 -- lib/papers/upload.ts) via storage.foldername(name).
 
+drop policy if exists "papers_bucket_insert_own_folder" on storage.objects;
 create policy "papers_bucket_insert_own_folder" on storage.objects
   for insert to authenticated
   with check (
     bucket_id = 'papers' and (storage.foldername(name))[1] = auth.uid()::text
   );
 
+drop policy if exists "papers_bucket_select_own_folder" on storage.objects;
 create policy "papers_bucket_select_own_folder" on storage.objects
   for select to authenticated
   using (
     bucket_id = 'papers' and (storage.foldername(name))[1] = auth.uid()::text
   );
 
+drop policy if exists "papers_bucket_delete_own_folder" on storage.objects;
 create policy "papers_bucket_delete_own_folder" on storage.objects
   for delete to authenticated
   using (

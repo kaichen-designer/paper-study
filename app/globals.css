@@ -173,10 +173,12 @@ button:disabled {
   line-height: 1.35;
 }
 
-.paper-card-badges {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
+/* .paper-card is flex-direction: column, so a flex item stretches to
+   fill the cross axis (full card width) by default. The imported badge
+   is meant to size to its own content and sit inline, as it did before
+   this branch introduced the column layout. */
+.paper-card > .reading-status-badge {
+  align-self: flex-start;
 }
 
 /* --- Paper reader layout --- */
@@ -483,4 +485,44 @@ body.pen-mode-drawing textarea {
   background: #4a1d1d;
   color: #ffd9d9;
   font-size: 0.9rem;
+}
+
+/* --- Reading stages and trash --- */
+
+.paper-stage-group {
+  margin-bottom: 1.5rem;
+}
+
+.paper-stage-group > h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+  opacity: 0.8;
+}
+
+.paper-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+  margin-top: 0.4rem;
+  font-size: 0.85rem;
+}
+
+.paper-card-rename {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+}
+
+.paper-card-confirm {
+  margin-top: 0.5rem;
+  padding: 0.6rem;
+  border-radius: var(--radius-card);
+  background: #4a1d1d;
+  color: #ffd9d9;
+}
+
+.trash-toggle {
+  margin-bottom: 1rem;
 }

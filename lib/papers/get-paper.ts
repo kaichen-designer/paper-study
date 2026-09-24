@@ -10,6 +10,12 @@ const SIGNED_URL_TTL_SECONDS = 60 * 5;
  * policy (schema.sql) to return null/no-row rather than another user's
  * paper when the id belongs to someone else — this function does not add
  * its own user_id filter, matching the pattern in lib/papers/queries.ts.
+ *
+ * A removed (trashed) paper also returns null here, not just a row with
+ * `deleted_at` set: the reader route (`app/library/[id]/page.tsx`) treats
+ * null as "not found" and 404s. Without this, a trashed card's link would
+ * still open a live reader that can annotate and finish a paper sitting
+ * in the trash (see IMPORTANT 5).
  */
 export async function getPaperById(supabase: SupabaseClient, id: string): Promise<Paper | null> {
   const { data, error } = await supabase.from(PAPERS_TABLE).select("*").eq("id", id).single();
@@ -18,7 +24,12 @@ export async function getPaperById(supabase: SupabaseClient, id: string): Promis
     return null;
   }
 
-  return data as Paper;
+  const paper = data as Paper;
+  if (paper.deleted_at !== null) {
+    return null;
+  }
+
+  return paper;
 }
 
 /**

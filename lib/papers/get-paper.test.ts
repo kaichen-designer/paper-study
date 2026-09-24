@@ -11,6 +11,7 @@ describe("getPaperById", () => {
       storage_path: "u1/a.pdf",
       uploaded_at: "now",
       metadata: {},
+      deleted_at: null,
     };
     const singleMock = vi.fn().mockResolvedValue({ data: paper, error: null });
     const eqMock = vi.fn().mockReturnValue({ single: singleMock });
@@ -33,6 +34,31 @@ describe("getPaperById", () => {
     const supabase = { from: fromMock } as unknown as SupabaseClient;
 
     const result = await getPaperById(supabase, "someone-elses-paper");
+
+    expect(result).toBeNull();
+  });
+
+  // IMPORTANT 5: a removed paper must 404 through the reader route, not
+  // stay reachable and annotatable while sitting in the trash. Without
+  // this, PaperCard's link removal is only cosmetic — the id is still a
+  // live route.
+  it("returns null for a paper that has been removed (deleted_at set), even though the row still exists", async () => {
+    const trashedPaper = {
+      id: "p1",
+      user_id: "u1",
+      title: "A",
+      storage_path: "u1/a.pdf",
+      uploaded_at: "now",
+      metadata: {},
+      deleted_at: "2026-09-20T00:00:00.000Z",
+    };
+    const singleMock = vi.fn().mockResolvedValue({ data: trashedPaper, error: null });
+    const eqMock = vi.fn().mockReturnValue({ single: singleMock });
+    const selectMock = vi.fn().mockReturnValue({ eq: eqMock });
+    const fromMock = vi.fn().mockReturnValue({ select: selectMock });
+    const supabase = { from: fromMock } as unknown as SupabaseClient;
+
+    const result = await getPaperById(supabase, "p1");
 
     expect(result).toBeNull();
   });
