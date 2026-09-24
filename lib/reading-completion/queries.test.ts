@@ -59,4 +59,21 @@ describe("markFinishedReading", () => {
 
     await expect(markFinishedReading(supabase, "p1")).rejects.toThrow();
   });
+
+  it("sets the reading stage as well, so the library and the reader cannot disagree", async () => {
+    const singleMock = vi.fn().mockResolvedValue({ data: { id: "p1" }, error: null });
+    const selectMock = vi.fn().mockReturnValue({ single: singleMock });
+    const eqMock = vi.fn().mockReturnValue({ select: selectMock });
+    const updateMock = vi.fn().mockReturnValue({ eq: eqMock });
+    const supabase = {
+      from: vi.fn().mockReturnValue({ update: updateMock }),
+    } as unknown as SupabaseClient;
+
+    await markFinishedReading(supabase, "p1");
+
+    expect(updateMock.mock.calls[0][0]).toMatchObject({
+      reading_stage: "finished",
+      finished_reading: true,
+    });
+  });
 });

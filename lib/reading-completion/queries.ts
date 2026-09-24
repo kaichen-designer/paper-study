@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Paper } from "@/lib/papers/queries";
+import { setReadingStage } from "@/lib/papers/reading-stage";
 
 /**
  * Marks that the reader has scrolled/paged to the last page of the paper.
@@ -31,26 +32,13 @@ export async function markReachedLastPage(supabase: SupabaseClient, paperId: str
 }
 
 /**
- * Marks a paper as finished reading, stamping `finished_at` with the
- * current time.
+ * Marks a paper as finished reading.
  *
- * Access-scoping note: same pattern as markReachedLastPage above — no
- * `userId`/`user_id` parameter, relying entirely on the `papers_update_own`
- * RLS policy. `.select().single()` after `.update()` is deliberate for the
- * same reason: it turns a zero-row match (wrong id, or blocked by RLS)
- * into an explicit thrown Error instead of a silent no-op.
+ * Delegates to setReadingStage rather than writing `finished_reading`
+ * directly: the library's stage column and this flag describe the same
+ * fact, and a second writer is how they drift apart. The signature is
+ * unchanged so callers need not care.
  */
 export async function markFinishedReading(supabase: SupabaseClient, paperId: string): Promise<Paper> {
-  const { data, error } = await supabase
-    .from("papers")
-    .update({ finished_reading: true, finished_at: new Date().toISOString() })
-    .eq("id", paperId)
-    .select()
-    .single();
-
-  if (error) {
-    throw new Error(`Failed to mark finished reading: ${error.message}`);
-  }
-
-  return data as Paper;
+  return setReadingStage(supabase, paperId, "finished");
 }
