@@ -5,12 +5,13 @@ import PaperCard from "./PaperCard";
 const renamePaperMock = vi.fn();
 const setReadingStageMock = vi.fn();
 const softDeletePaperMock = vi.fn();
+const restorePaperMock = vi.fn();
 const purgePaperMock = vi.fn();
 
 vi.mock("@/lib/papers/queries", () => ({
   renamePaper: (...a: unknown[]) => renamePaperMock(...a),
   softDeletePaper: (...a: unknown[]) => softDeletePaperMock(...a),
-  restorePaper: vi.fn(),
+  restorePaper: (...a: unknown[]) => restorePaperMock(...a),
   purgePaper: (...a: unknown[]) => purgePaperMock(...a),
 }));
 
@@ -122,5 +123,127 @@ describe("PaperCard", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "確定永久刪除" }));
     await waitFor(() => expect(purgePaperMock).toHaveBeenCalled());
+  });
+
+  // BLOCKING 2: a second click before the first purge's round trip lands
+  // must not re-issue purgePaper for a row that may already be gone.
+  it("disables the confirm-purge button while a purge is in flight, so a second click fires nothing", async () => {
+    let resolvePurge!: () => void;
+    purgePaperMock.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolvePurge = resolve;
+        })
+    );
+    render(
+      <PaperCard
+        paper={{ ...paper, deleted_at: "2026-09-20T00:00:00.000Z" }}
+        noteCount={0}
+        onChanged={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "永久刪除" }));
+    const confirmButton = screen.getByRole("button", { name: "確定永久刪除" });
+
+    fireEvent.click(confirmButton);
+    await waitFor(() => expect(confirmButton).toBeDisabled());
+
+    fireEvent.click(confirmButton);
+    expect(purgePaperMock).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    resolvePurge();
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
+  });
+
+  // IMPORTANT 3: choosing a new stage must be reflected immediately, not
+  // only after the server round trip lands — otherwise the select snaps
+  // back to the old value and reads as a rejected choice.
+  it("shows the newly chosen stage immediately, before the write resolves", async () => {
+    let resolveStage!: (value: unknown) => void;
+    setReadingStageMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveStage = resolve;
+        })
+    );
+    render(<PaperCard paper={paper} noteCount={0} onChanged={vi.fn()} />);
+
+    const select = screen.getByLabelText("閱讀階段") as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: "finished" } });
+
+    expect(select).toHaveValue("finished");
+
+    resolveStage({ ...paper, reading_stage: "finished" });
+    await waitFor(() => expect(select).not.toBeDisabled());
+    expect(select).toHaveValue("finished");
+  });
+
+  it("reverts the stage selection and reports an error when the write fails", async () => {
+    setReadingStageMock.mockRejectedValue(new Error("boom"));
+    render(<PaperCard paper={paper} noteCount={0} onChanged={vi.fn()} />);
+
+    const select = screen.getByLabelText("閱讀階段") as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: "finished" } });
+
+    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+    expect(select).toHaveValue("up_next");
+  });
+
+  // IMPORTANT 5: a removed paper must not be a live link into the reader,
+  // where it could still be annotated or marked finished while trashed.
+  it("does not link a removed paper into the reader", () => {
+    render(
+      <PaperCard
+        paper={{ ...paper, deleted_at: "2026-09-20T00:00:00.000Z" }}
+        noteCount={0}
+        onChanged={vi.fn()}
+      />
+    );
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+    expect(screen.getByText("Guidelines for Human-AI Interaction")).toBeInTheDocument();
+  });
+
+  it("links a paper still in the library into the reader", () => {
+    render(<PaperCard paper={paper} noteCount={0} onChanged={vi.fn()} />);
+    expect(screen.getByRole("link")).toHaveAttribute("href", "/library/p1");
+  });
+
+  // IMPORTANT 6: a failed note count must read as an honest "unknown",
+  // never as a confident zero, right before an irreversible delete.
+  it("shows an unquantified warning instead of a false zero when the note count is unknown", () => {
+    render(
+      <PaperCard
+        paper={{ ...paper, deleted_at: "2026-09-20T00:00:00.000Z" }}
+        noteCount={null}
+        onChanged={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "永久刪除" }));
+
+    const dialog = screen.getByRole("alertdialog");
+    expect(dialog).toHaveTextContent("它的筆記與畫記");
+    expect(dialog).not.toHaveTextContent("它的 0 筆");
+  });
+
+  // MINOR 9: a stale error from an earlier action must not linger under
+  // the card through a later, successful action.
+  it("clears a previous error once restore succeeds", async () => {
+    restorePaperMock.mockRejectedValueOnce(new Error("boom")).mockResolvedValueOnce(undefined);
+    render(
+      <PaperCard
+        paper={{ ...paper, deleted_at: "2026-09-20T00:00:00.000Z" }}
+        noteCount={0}
+        onChanged={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "還原" }));
+    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "還原" }));
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
   });
 });

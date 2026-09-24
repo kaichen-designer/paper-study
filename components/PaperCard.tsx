@@ -19,7 +19,7 @@ export default function PaperCard({
   onChanged,
 }: {
   paper: PaperWithFileUrl;
-  noteCount: number;
+  noteCount: number | null;
   onChanged: () => void;
 }) {
   const [title, setTitle] = useState(paper.title);
@@ -27,9 +27,20 @@ export default function PaperCard({
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+  // Seeded from the prop, then kept locally: props are a server round
+  // trip behind every action here, so the select must reflect what the
+  // user just chose, not what the server confirmed five hundred
+  // milliseconds ago (see IMPORTANT 3).
+  const [stage, setStage] = useState<ReadingStage>(paper.reading_stage);
+  // One in-flight guard shared by all five write actions (rename, stage,
+  // remove, restore, purge). Without it a second click before the first
+  // write's round trip lands re-issues the same mutation against a row
+  // that may already be gone (see BLOCKING 2).
+  const [pending, setPending] = useState(false);
   const removed = paper.deleted_at !== null;
 
   async function handleRename() {
+    setPending(true);
     const supabase = getSupabaseBrowserClient();
     try {
       const updated = await renamePaper(supabase, paper.id, draft);
@@ -39,57 +50,92 @@ export default function PaperCard({
       onChanged();
     } catch {
       setError("標題不能是空白。");
+    } finally {
+      setPending(false);
     }
   }
 
-  async function handleStageChange(stage: ReadingStage) {
+  async function handleStageChange(nextStage: ReadingStage) {
+    const previousStage = stage;
+    setStage(nextStage);
+    setPending(true);
     const supabase = getSupabaseBrowserClient();
     try {
-      await setReadingStage(supabase, paper.id, stage);
+      await setReadingStage(supabase, paper.id, nextStage);
       setError(null);
       onChanged();
     } catch {
+      setStage(previousStage);
       setError("階段更新失敗,請稍後再試。");
+    } finally {
+      setPending(false);
     }
   }
 
   async function handleRemove() {
+    setPending(true);
     const supabase = getSupabaseBrowserClient();
     try {
       await softDeletePaper(supabase, paper.id);
+      setError(null);
       onChanged();
     } catch {
       setError("移至回收筒失敗,請稍後再試。");
+    } finally {
+      setPending(false);
     }
   }
 
   async function handleRestore() {
+    setPending(true);
     const supabase = getSupabaseBrowserClient();
     try {
       await restorePaper(supabase, paper.id);
+      setError(null);
       onChanged();
     } catch {
       setError("還原失敗,請稍後再試。");
+    } finally {
+      setPending(false);
     }
   }
 
   async function handlePurge() {
+    setPending(true);
     const supabase = getSupabaseBrowserClient();
     try {
       await purgePaper(supabase, paper);
       setConfirming(false);
+      setError(null);
       onChanged();
     } catch {
       setError("永久刪除失敗,請稍後再試。");
+    } finally {
+      setPending(false);
     }
   }
 
+  const thumbnailAndTitle = (
+    <>
+      <PaperThumbnail fileUrl={paper.fileUrl} />
+      {!editing && <span className="paper-card-title">{title}</span>}
+    </>
+  );
+
   return (
     <li className="paper-card">
-      <Link href={`/library/${paper.id}`} className="paper-card-link">
-        <PaperThumbnail fileUrl={paper.fileUrl} />
-        {!editing && <span className="paper-card-title">{title}</span>}
-      </Link>
+      {/* A removed paper is not readable — it's in the trash. Rendering
+          this as a plain Link would leave a live route into the reader,
+          where it could still be annotated or marked finished while
+          sitting in the trash (see IMPORTANT 5). getPaperById also
+          404s a removed paper's id directly, as a second layer. */}
+      {removed ? (
+        thumbnailAndTitle
+      ) : (
+        <Link href={`/library/${paper.id}`} className="paper-card-link">
+          {thumbnailAndTitle}
+        </Link>
+      )}
 
       {paper.imported_to_detabase && (
         <span className="reading-status-badge">📥 已匯入</span>
@@ -103,7 +149,7 @@ export default function PaperCard({
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
           />
-          <button type="button" onClick={handleRename}>
+          <button type="button" onClick={handleRename} disabled={pending}>
             儲存
           </button>
           <button
@@ -126,22 +172,24 @@ export default function PaperCard({
               setDraft(title);
               setEditing(true);
             }}
+            disabled={pending}
           >
             重新命名
           </button>
           <label htmlFor={`stage-${paper.id}`}>閱讀階段</label>
           <select
             id={`stage-${paper.id}`}
-            value={paper.reading_stage}
+            value={stage}
             onChange={(event) => handleStageChange(event.target.value as ReadingStage)}
+            disabled={pending}
           >
-            {READING_STAGES.map((stage) => (
-              <option key={stage} value={stage}>
-                {STAGE_LABELS[stage]}
+            {READING_STAGES.map((s) => (
+              <option key={s} value={s}>
+                {STAGE_LABELS[s]}
               </option>
             ))}
           </select>
-          <button type="button" onClick={handleRemove}>
+          <button type="button" onClick={handleRemove} disabled={pending}>
             移至回收筒
           </button>
         </div>
@@ -149,10 +197,10 @@ export default function PaperCard({
 
       {removed && (
         <div className="paper-card-actions">
-          <button type="button" onClick={handleRestore}>
+          <button type="button" onClick={handleRestore} disabled={pending}>
             還原
           </button>
-          <button type="button" onClick={() => setConfirming(true)}>
+          <button type="button" onClick={() => setConfirming(true)} disabled={pending}>
             永久刪除
           </button>
         </div>
@@ -161,12 +209,14 @@ export default function PaperCard({
       {confirming && (
         <div role="alertdialog" className="paper-card-confirm">
           <p>
-            將永久刪除這篇論文、它的 {noteCount} 筆筆記與畫記,以及所有反思對話紀錄,無法復原。
+            將永久刪除這篇論文、
+            {noteCount === null ? "它的筆記與畫記" : `它的 ${noteCount} 筆筆記與畫記`}
+            ,以及所有反思對話紀錄,無法復原。
           </p>
-          <button type="button" onClick={handlePurge}>
+          <button type="button" onClick={handlePurge} disabled={pending}>
             確定永久刪除
           </button>
-          <button type="button" onClick={() => setConfirming(false)}>
+          <button type="button" onClick={() => setConfirming(false)} disabled={pending}>
             取消
           </button>
         </div>
