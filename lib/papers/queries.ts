@@ -18,6 +18,8 @@ export type Paper = {
   finished_reading: boolean;
   finished_at: string | null;
   imported_to_detabase: boolean;
+  reading_stage: "up_next" | "reading" | "finished";
+  deleted_at: string | null;
 };
 
 export type InsertPaperInput = {
