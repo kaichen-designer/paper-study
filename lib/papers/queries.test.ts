@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { vi } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { insertPaper, listPapers } from "./queries";
+import { insertPaper, listPapers, renamePaper } from "./queries";
 
 function makeListMock(result: { data: unknown; error: unknown }) {
   const orderMock = vi.fn().mockResolvedValue(result);
@@ -175,5 +175,34 @@ describe("insertPaper", () => {
     await insertPaper(supabase, maliciousInput);
 
     expect(insertMock).toHaveBeenCalledWith(expect.objectContaining({ user_id: "real-user" }));
+  });
+});
+
+describe("renamePaper", () => {
+  function makeRenameMock() {
+    const singleMock = vi.fn().mockResolvedValue({ data: { id: "p1" }, error: null });
+    const selectMock = vi.fn().mockReturnValue({ single: singleMock });
+    const eqMock = vi.fn().mockReturnValue({ select: selectMock });
+    const updateMock = vi.fn().mockReturnValue({ eq: eqMock });
+    const supabase = {
+      from: vi.fn().mockReturnValue({ update: updateMock }),
+    } as unknown as SupabaseClient;
+    return { supabase, updateMock };
+  }
+
+  it("stores the title with surrounding whitespace removed", async () => {
+    const { supabase, updateMock } = makeRenameMock();
+
+    await renamePaper(supabase, "p1", "  Attention Is All You Need  ");
+
+    expect(updateMock).toHaveBeenCalledWith({ title: "Attention Is All You Need" });
+  });
+
+  it("rejects a title that is empty once trimmed, without writing", async () => {
+    const { supabase, updateMock } = makeRenameMock();
+
+    await expect(renamePaper(supabase, "p1", "   ")).rejects.toThrow();
+    await expect(renamePaper(supabase, "p1", "")).rejects.toThrow();
+    expect(updateMock).not.toHaveBeenCalled();
   });
 });

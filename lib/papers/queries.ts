@@ -101,3 +101,38 @@ export async function insertPaper(
 
   return data as Paper;
 }
+
+/**
+ * Renames a paper.
+ *
+ * A title of only whitespace is rejected rather than stored: the library
+ * would render an unlabelled, unidentifiable card, and the upload flow
+ * guarantees a non-empty title, so nothing should be able to produce one.
+ *
+ * Access-scoping note: no `userId` parameter; the `papers_update_own` RLS
+ * policy scopes the row. `.select().single()` makes a zero-row match an
+ * error rather than a silent no-op.
+ */
+export async function renamePaper(
+  supabase: SupabaseClient,
+  paperId: string,
+  title: string
+): Promise<Paper> {
+  const trimmed = title.trim();
+  if (trimmed.length === 0) {
+    throw new Error("Cannot rename a paper to an empty title.");
+  }
+
+  const { data, error } = await supabase
+    .from("papers")
+    .update({ title: trimmed })
+    .eq("id", paperId)
+    .select()
+    .single();
+
+  if (error) {
+    throw new Error(`Failed to rename paper: ${error.message}`);
+  }
+
+  return data as Paper;
+}
