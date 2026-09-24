@@ -43,6 +43,7 @@ export async function listPapers(supabase: SupabaseClient): Promise<Paper[]> {
   const { data, error } = await supabase
     .from("papers")
     .select("*")
+    .is("deleted_at", null)
     .order("uploaded_at", { ascending: false });
 
   if (error) {
@@ -135,4 +136,53 @@ export async function renamePaper(
   }
 
   return data as Paper;
+}
+
+/**
+ * Removes a paper from the library without destroying it.
+ *
+ * A timestamp rather than a boolean: it answers both "is this removed"
+ * and "when", which is what the trash orders by, and leaves room for a
+ * retention policy without another schema change.
+ */
+export async function softDeletePaper(supabase: SupabaseClient, paperId: string): Promise<void> {
+  const { error } = await supabase
+    .from("papers")
+    .update({ deleted_at: new Date().toISOString() })
+    .eq("id", paperId)
+    .select()
+    .single();
+
+  if (error) {
+    throw new Error(`Failed to remove paper: ${error.message}`);
+  }
+}
+
+/** Returns a removed paper to the library, under the stage it had before. */
+export async function restorePaper(supabase: SupabaseClient, paperId: string): Promise<void> {
+  const { error } = await supabase
+    .from("papers")
+    .update({ deleted_at: null })
+    .eq("id", paperId)
+    .select()
+    .single();
+
+  if (error) {
+    throw new Error(`Failed to restore paper: ${error.message}`);
+  }
+}
+
+/** Lists removed papers for the trash view, most recently removed first. */
+export async function listDeletedPapers(supabase: SupabaseClient): Promise<Paper[]> {
+  const { data, error } = await supabase
+    .from("papers")
+    .select("*")
+    .not("deleted_at", "is", null)
+    .order("deleted_at", { ascending: false });
+
+  if (error) {
+    throw new Error(`Failed to list removed papers: ${error.message}`);
+  }
+
+  return (data ?? []) as Paper[];
 }

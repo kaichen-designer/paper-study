@@ -1,19 +1,29 @@
 import { describe, expect, it } from "vitest";
 import { vi } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { insertPaper, listPapers, renamePaper } from "./queries";
+import {
+  insertPaper,
+  listDeletedPapers,
+  listPapers,
+  renamePaper,
+  restorePaper,
+  softDeletePaper,
+} from "./queries";
 
 function makeListMock(result: { data: unknown; error: unknown }) {
   const orderMock = vi.fn().mockResolvedValue(result);
+  // listPapers chains `.is("deleted_at", null)` between `.select()` and
+  // `.order()` to hide removed papers from the library listing.
+  const isMock = vi.fn().mockReturnValue({ order: orderMock });
   // `eq` stands in for any caller-injectable filter. listPapers has no
   // parameter surface for a filter, so this must never be invoked.
   const eqMock = vi.fn();
-  const selectMock = vi.fn().mockReturnValue({ order: orderMock, eq: eqMock });
+  const selectMock = vi.fn().mockReturnValue({ is: isMock, eq: eqMock });
   const fromMock = vi.fn().mockReturnValue({ select: selectMock });
 
   const supabase = { from: fromMock } as unknown as SupabaseClient;
 
-  return { supabase, fromMock, selectMock, orderMock, eqMock };
+  return { supabase, fromMock, selectMock, isMock, orderMock, eqMock };
 }
 
 function makeInsertMock({
@@ -49,7 +59,7 @@ describe("listPapers", () => {
         metadata: {},
       },
     ];
-    const { supabase, fromMock, selectMock, orderMock, eqMock } = makeListMock({
+    const { supabase, fromMock, selectMock, isMock, orderMock, eqMock } = makeListMock({
       data: papers,
       error: null,
     });
@@ -58,6 +68,7 @@ describe("listPapers", () => {
 
     expect(fromMock).toHaveBeenCalledWith("papers");
     expect(selectMock).toHaveBeenCalled();
+    expect(isMock).toHaveBeenCalledWith("deleted_at", null);
     expect(orderMock).toHaveBeenCalledWith("uploaded_at", { ascending: false });
     expect(eqMock).not.toHaveBeenCalled();
     expect(result).toEqual(papers);
@@ -204,5 +215,62 @@ describe("renamePaper", () => {
     await expect(renamePaper(supabase, "p1", "   ")).rejects.toThrow();
     await expect(renamePaper(supabase, "p1", "")).rejects.toThrow();
     expect(updateMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("removal and restoration", () => {
+  function makeListMock(rows: unknown[] = []) {
+    const orderMock = vi.fn().mockResolvedValue({ data: rows, error: null });
+    const isMock = vi.fn().mockReturnValue({ order: orderMock });
+    const notMock = vi.fn().mockReturnValue({ order: orderMock });
+    const selectMock = vi.fn().mockReturnValue({ is: isMock, not: notMock });
+    const supabase = {
+      from: vi.fn().mockReturnValue({ select: selectMock }),
+    } as unknown as SupabaseClient;
+    return { supabase, isMock, notMock, orderMock };
+  }
+
+  function makeUpdateMock() {
+    const singleMock = vi.fn().mockResolvedValue({ data: { id: "p1" }, error: null });
+    const selectMock = vi.fn().mockReturnValue({ single: singleMock });
+    const eqMock = vi.fn().mockReturnValue({ select: selectMock });
+    const updateMock = vi.fn().mockReturnValue({ eq: eqMock });
+    const supabase = {
+      from: vi.fn().mockReturnValue({ update: updateMock }),
+    } as unknown as SupabaseClient;
+    return { supabase, updateMock };
+  }
+
+  it("hides removed papers from the library listing", async () => {
+    const { supabase, isMock } = makeListMock();
+
+    await listPapers(supabase);
+
+    expect(isMock).toHaveBeenCalledWith("deleted_at", null);
+  });
+
+  it("lists only removed papers, most recently removed first", async () => {
+    const { supabase, notMock, orderMock } = makeListMock();
+
+    await listDeletedPapers(supabase);
+
+    expect(notMock).toHaveBeenCalledWith("deleted_at", "is", null);
+    expect(orderMock).toHaveBeenCalledWith("deleted_at", { ascending: false });
+  });
+
+  it("stamps the removal time rather than destroying the row", async () => {
+    const { supabase, updateMock } = makeUpdateMock();
+
+    await softDeletePaper(supabase, "p1");
+
+    expect(typeof updateMock.mock.calls[0][0].deleted_at).toBe("string");
+  });
+
+  it("restores a paper without touching its reading stage", async () => {
+    const { supabase, updateMock } = makeUpdateMock();
+
+    await restorePaper(supabase, "p1");
+
+    expect(updateMock).toHaveBeenCalledWith({ deleted_at: null });
   });
 });
