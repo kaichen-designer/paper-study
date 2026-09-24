@@ -99,6 +99,16 @@ describe("PaperCard", () => {
     await waitFor(() => expect(softDeletePaperMock).toHaveBeenCalledWith({}, "p1"));
   });
 
+  it("shows an imported indicator when the paper has been imported", () => {
+    render(<PaperCard paper={{ ...paper, imported_to_detabase: true }} noteCount={0} onChanged={vi.fn()} />);
+    expect(screen.getByText("📥 已匯入")).toBeInTheDocument();
+  });
+
+  it("shows no imported indicator when the paper has not been imported", () => {
+    render(<PaperCard paper={{ ...paper, imported_to_detabase: false }} noteCount={0} onChanged={vi.fn()} />);
+    expect(screen.queryByText("📥 已匯入")).not.toBeInTheDocument();
+  });
+
   it("requires confirmation naming the note count before permanent deletion", async () => {
     render(
       <PaperCard paper={{ ...paper, deleted_at: "2026-09-20T00:00:00.000Z" }} noteCount={12} onChanged={vi.fn()} />

@@ -15,8 +15,11 @@ vi.mock("next/navigation", () => ({
 // PaperCard itself renders (rename UI, stage select, badges, links, etc. —
 // all owned and tested by PaperCard.test.tsx).
 vi.mock("./PaperCard", () => ({
-  default: ({ paper }: { paper: { id: string; title: string } }) => (
-    <li data-testid={`card-${paper.id}`}>{paper.title}</li>
+  default: ({ paper, noteCount }: { paper: { id: string; title: string }; noteCount: number }) => (
+    <li data-testid={`card-${paper.id}`}>
+      {paper.title}
+      <span data-testid={`count-${paper.id}`}>{noteCount}</span>
+    </li>
   ),
 }));
 
@@ -102,28 +105,28 @@ describe("PaperList", () => {
     expect(screen.getByTestId("card-abc-123")).toBeInTheDocument();
   });
 
-  it("shows no status badge when a paper has neither reached its last page nor been marked finished", () => {
+  // Replaces the two "shows no status badge..." tests. Those asserted
+  // absence of DOM text ("✅ 已讀完" / "📥 已匯入") that the mocked PaperCard
+  // never renders regardless of input — they passed unconditionally, no
+  // matter what PaperList did with the paper's flags. This instead
+  // exercises something PaperList actually decides: which noteCount
+  // reaches which card, keyed by paper id.
+  it("gives each card the note count belonging to its own paper", () => {
     render(
       <PaperList
-        papers={[{ ...base, reached_last_page: false, finished_reading: false, imported_to_detabase: false }]}
+        papers={[
+          { ...base, id: "a", title: "A", reading_stage: "reading" },
+          { ...base, id: "b", title: "B", reading_stage: "reading" },
+        ]}
         deletedPapers={[]}
-        noteCounts={{}}
+        noteCounts={{ a: 7, b: 0 }}
       />
     );
-    expect(screen.queryByText("✅ 已讀完")).not.toBeInTheDocument();
-    expect(screen.queryByText("📥 已匯入")).not.toBeInTheDocument();
-  });
 
-  it("shows no status badge when a paper has reached its last page but is not yet marked finished", () => {
-    render(
-      <PaperList
-        papers={[{ ...base, reached_last_page: true, finished_reading: false, imported_to_detabase: false }]}
-        deletedPapers={[]}
-        noteCounts={{}}
-      />
-    );
-    expect(screen.queryByText("✅ 已讀完")).not.toBeInTheDocument();
-    expect(screen.queryByText("📥 已匯入")).not.toBeInTheDocument();
+    // A card that received another paper's count would name the wrong
+    // number in its permanent-deletion confirmation.
+    expect(screen.getByTestId("count-a")).toHaveTextContent("7");
+    expect(screen.getByTestId("count-b")).toHaveTextContent("0");
   });
 
   // Replaces "shows only the finished badge when a paper is marked finished
@@ -143,24 +146,10 @@ describe("PaperList", () => {
     expect(screen.getByRole("heading", { name: "讀完了" })).toBeInTheDocument();
   });
 
-  // Replaces "shows both the finished and imported badges when a paper has
-  // been imported". As above for the finished badge. There is no current
-  // replacement for the "imported" badge specifically: PaperCard renders no
-  // imported indicator and no prop groups papers by import status, so an
-  // imported paper is now visually indistinguishable from a non-imported
-  // one. That looks like a real regression inherited from Task 7's
-  // PaperCard — flagged in the task report, not fixed here since PaperCard
-  // is out of this task's scope.
-  it("renders an imported paper without error", () => {
-    render(
-      <PaperList
-        papers={[{ ...base, reading_stage: "finished", finished_reading: true, imported_to_detabase: true }]}
-        deletedPapers={[]}
-        noteCounts={{}}
-      />
-    );
-    expect(screen.getByText(base.title)).toBeInTheDocument();
-  });
+  // "shows both the finished and imported badges when a paper has been
+  // imported" is gone from this file: the "imported" indicator now lives
+  // on PaperCard itself (component review, finding 2) and is covered by
+  // PaperCard.test.tsx, not here.
 
   // Replaces "renders a cover thumbnail for each paper card". The
   // thumbnail is rendered inside PaperCard, which is mocked here, so it

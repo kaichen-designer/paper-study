@@ -91,6 +91,10 @@ export default function PaperCard({
         {!editing && <span className="paper-card-title">{title}</span>}
       </Link>
 
+      {paper.imported_to_detabase && (
+        <span className="reading-status-badge">📥 已匯入</span>
+      )}
+
       {editing && (
         <div className="paper-card-rename">
           <label htmlFor={`title-${paper.id}`}>論文標題</label>
