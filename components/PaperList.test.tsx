@@ -18,6 +18,8 @@ const paper = (overrides: Partial<PaperWithFileUrl>): PaperWithFileUrl => ({
   finished_reading: false,
   finished_at: null,
   imported_to_detabase: false,
+  reading_stage: "up_next",
+  deleted_at: null,
   ...overrides,
 });
 
