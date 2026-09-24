@@ -5,6 +5,7 @@ import {
   insertPaper,
   listDeletedPapers,
   listPapers,
+  purgePaper,
   renamePaper,
   restorePaper,
   softDeletePaper,
@@ -272,5 +273,45 @@ describe("removal and restoration", () => {
     await restorePaper(supabase, "p1");
 
     expect(updateMock).toHaveBeenCalledWith({ deleted_at: null });
+  });
+});
+
+describe("purgePaper", () => {
+  function makePurgeMock(storageError: unknown = null) {
+    const order: string[] = [];
+    const singleMock = vi.fn().mockImplementation(async () => {
+      order.push("row");
+      return { data: { id: "p1" }, error: null };
+    });
+    const selectMock = vi.fn().mockReturnValue({ single: singleMock });
+    const eqMock = vi.fn().mockReturnValue({ select: selectMock });
+    const deleteMock = vi.fn().mockReturnValue({ eq: eqMock });
+    const removeMock = vi.fn().mockImplementation(async () => {
+      order.push("storage");
+      return { error: storageError };
+    });
+    const supabase = {
+      from: vi.fn().mockReturnValue({ delete: deleteMock }),
+      storage: { from: vi.fn().mockReturnValue({ remove: removeMock }) },
+    } as unknown as SupabaseClient;
+    return { supabase, order, removeMock, eqMock };
+  }
+
+  it("deletes the row before the stored file, so no paper can point at a missing file", async () => {
+    const { supabase, order, removeMock, eqMock } = makePurgeMock();
+
+    await purgePaper(supabase, { id: "p1", storage_path: "u1/p1.pdf" });
+
+    expect(order).toEqual(["row", "storage"]);
+    expect(eqMock).toHaveBeenCalledWith("id", "p1");
+    expect(removeMock).toHaveBeenCalledWith(["u1/p1.pdf"]);
+  });
+
+  it("still succeeds when the stored file cannot be deleted", async () => {
+    const { supabase } = makePurgeMock({ message: "not found" });
+
+    await expect(
+      purgePaper(supabase, { id: "p1", storage_path: "u1/p1.pdf" })
+    ).resolves.toBeUndefined();
   });
 });

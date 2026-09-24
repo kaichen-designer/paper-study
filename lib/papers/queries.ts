@@ -186,3 +186,37 @@ export async function listDeletedPapers(supabase: SupabaseClient): Promise<Paper
 
   return (data ?? []) as Paper[];
 }
+
+/**
+ * Permanently deletes a paper, its notes, annotations and reflection
+ * messages (by `on delete cascade`), and its stored PDF.
+ *
+ * Order matters and is deliberate: the row goes first, then the file on
+ * a best-effort basis. Doing it the other way round risks leaving a row
+ * whose file is gone — a paper in the library that cannot be opened.
+ * This way the worst case is an orphaned file: wasted space that shows
+ * up nowhere and can be swept later. Auditable waste beats broken state.
+ *
+ * Access-scoping note: no `userId` parameter; the `papers_delete_own` RLS
+ * policy scopes the row. `.select().single()` makes a zero-row match an
+ * error rather than a silent no-op.
+ */
+export async function purgePaper(
+  supabase: SupabaseClient,
+  paper: Pick<Paper, "id" | "storage_path">
+): Promise<void> {
+  const { error } = await supabase
+    .from("papers")
+    .delete()
+    .eq("id", paper.id)
+    .select()
+    .single();
+
+  if (error) {
+    throw new Error(`Failed to delete paper: ${error.message}`);
+  }
+
+  // Best effort: a failure here leaves an orphaned file, which is
+  // preferable to reporting a failure for a deletion that did happen.
+  await supabase.storage.from("papers").remove([paper.storage_path]);
+}
