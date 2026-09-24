@@ -284,7 +284,11 @@ describe("purgePaper", () => {
       return { data: { id: "p1" }, error: null };
     });
     const selectMock = vi.fn().mockReturnValue({ single: singleMock });
-    const eqMock = vi.fn().mockReturnValue({ select: selectMock });
+    // purgePaper chains `.not("deleted_at", "is", null)` between `.eq()`
+    // and `.select()` so the delete can only ever match a row that is
+    // currently in the trash (IMPORTANT 4).
+    const notMock = vi.fn().mockReturnValue({ select: selectMock });
+    const eqMock = vi.fn().mockReturnValue({ not: notMock });
     const deleteMock = vi.fn().mockReturnValue({ eq: eqMock });
     const removeMock = vi.fn().mockImplementation(async () => {
       order.push("storage");
@@ -294,16 +298,17 @@ describe("purgePaper", () => {
       from: vi.fn().mockReturnValue({ delete: deleteMock }),
       storage: { from: vi.fn().mockReturnValue({ remove: removeMock }) },
     } as unknown as SupabaseClient;
-    return { supabase, order, removeMock, eqMock };
+    return { supabase, order, removeMock, eqMock, notMock };
   }
 
   it("deletes the row before the stored file, so no paper can point at a missing file", async () => {
-    const { supabase, order, removeMock, eqMock } = makePurgeMock();
+    const { supabase, order, removeMock, eqMock, notMock } = makePurgeMock();
 
     await purgePaper(supabase, { id: "p1", storage_path: "u1/p1.pdf" });
 
     expect(order).toEqual(["row", "storage"]);
     expect(eqMock).toHaveBeenCalledWith("id", "p1");
+    expect(notMock).toHaveBeenCalledWith("deleted_at", "is", null);
     expect(removeMock).toHaveBeenCalledWith(["u1/p1.pdf"]);
   });
 
@@ -313,5 +318,32 @@ describe("purgePaper", () => {
     await expect(
       purgePaper(supabase, { id: "p1", storage_path: "u1/p1.pdf" })
     ).resolves.toBeUndefined();
+  });
+
+  it("does not permanently delete a paper that is not currently in the trash", async () => {
+    // Simulates the .not("deleted_at", "is", null) filter matching zero
+    // rows for a paper that was restored (or never removed): .single()
+    // sees no row and errors, exactly as it does for a wrong/missing id.
+    const singleMock = vi.fn().mockResolvedValue({
+      data: null,
+      error: { message: "JSON object requested, multiple (or no) rows returned" },
+    });
+    const selectMock = vi.fn().mockReturnValue({ single: singleMock });
+    const notMock = vi.fn().mockReturnValue({ select: selectMock });
+    const eqMock = vi.fn().mockReturnValue({ not: notMock });
+    const deleteMock = vi.fn().mockReturnValue({ eq: eqMock });
+    const removeMock = vi.fn();
+    const supabase = {
+      from: vi.fn().mockReturnValue({ delete: deleteMock }),
+      storage: { from: vi.fn().mockReturnValue({ remove: removeMock }) },
+    } as unknown as SupabaseClient;
+
+    await expect(
+      purgePaper(supabase, { id: "p1", storage_path: "u1/p1.pdf" })
+    ).rejects.toThrow();
+
+    expect(notMock).toHaveBeenCalledWith("deleted_at", "is", null);
+    // The row delete failed to match, so the file must never be touched.
+    expect(removeMock).not.toHaveBeenCalled();
   });
 });

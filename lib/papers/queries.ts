@@ -200,6 +200,13 @@ export async function listDeletedPapers(supabase: SupabaseClient): Promise<Paper
  * Access-scoping note: no `userId` parameter; the `papers_delete_own` RLS
  * policy scopes the row. `.select().single()` makes a zero-row match an
  * error rather than a silent no-op.
+ *
+ * Guarded at the data layer, not just the UI, so a paper that isn't in
+ * the trash cannot be destroyed even if a stale card believes it is
+ * (props lag a server round trip — see IMPORTANT 4). The delete only
+ * matches a row whose `deleted_at` is set; a paper restored moments
+ * earlier no longer matches, so `.single()` sees zero rows and this
+ * throws instead of destroying it.
  */
 export async function purgePaper(
   supabase: SupabaseClient,
@@ -209,6 +216,7 @@ export async function purgePaper(
     .from("papers")
     .delete()
     .eq("id", paper.id)
+    .not("deleted_at", "is", null)
     .select()
     .single();
 
