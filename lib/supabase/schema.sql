@@ -17,6 +17,38 @@ create table if not exists papers (
 
 create index if not exists papers_user_id_idx on papers (user_id);
 
+-- Reading stage. Three-valued rather than two booleans so that an
+-- impossible combination cannot be represented at all. `finished_reading`
+-- and `finished_at` are kept for the existing reading-completion flow and
+-- are written only by setReadingStage, so the two can never disagree.
+alter table papers
+  add column if not exists reading_stage text not null default 'up_next';
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'papers_reading_stage_check'
+  ) then
+    alter table papers
+      add constraint papers_reading_stage_check
+      check (reading_stage in ('up_next', 'reading', 'finished'));
+  end if;
+end $$;
+
+-- Backfill: a paper already marked finished belongs in the finished
+-- stage; everything else starts in up_next.
+update papers set reading_stage = 'finished'
+  where finished_reading = true and reading_stage <> 'finished';
+
+-- Soft delete. A timestamp rather than a boolean, so it answers both
+-- "is this removed" and "when was it removed" — the trash lists by
+-- removal time, and a retention policy later needs no schema change.
+alter table papers
+  add column if not exists deleted_at timestamptz;
+
+create index if not exists papers_user_deleted_idx
+  on papers (user_id, deleted_at);
+
 create table if not exists notes (
   id uuid primary key default gen_random_uuid(),
   paper_id uuid not null references papers (id) on delete cascade,
