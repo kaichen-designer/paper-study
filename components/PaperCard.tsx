@@ -38,7 +38,6 @@ export default function PaperCard({
       setError(null);
       onChanged();
     } catch {
-      setEditing(false);
       setError("標題不能是空白。");
     }
   }
@@ -103,7 +102,13 @@ export default function PaperCard({
           <button type="button" onClick={handleRename}>
             儲存
           </button>
-          <button type="button" onClick={() => setEditing(false)}>
+          <button
+            type="button"
+            onClick={() => {
+              setDraft(title);
+              setEditing(false);
+            }}
+          >
             取消
           </button>
         </div>
@@ -111,7 +116,13 @@ export default function PaperCard({
 
       {!removed && (
         <div className="paper-card-actions">
-          <button type="button" onClick={() => setEditing(true)}>
+          <button
+            type="button"
+            onClick={() => {
+              setDraft(title);
+              setEditing(true);
+            }}
+          >
             重新命名
           </button>
           <label htmlFor={`stage-${paper.id}`}>閱讀階段</label>

@@ -57,7 +57,7 @@ describe("PaperCard", () => {
     await waitFor(() => expect(screen.getByText("新標題")).toBeInTheDocument());
   });
 
-  it("reports a blank title instead of saving it", async () => {
+  it("reports a blank title, keeps the editor open, and leaves the stored title alone", async () => {
     renamePaperMock.mockRejectedValue(new Error("empty"));
     render(<PaperCard paper={paper} noteCount={0} onChanged={vi.fn()} />);
 
@@ -66,6 +66,13 @@ describe("PaperCard", () => {
     fireEvent.click(screen.getByRole("button", { name: "儲存" }));
 
     await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+
+    // Still editing: a rejected title is one the user wants to correct,
+    // so the field and what they typed must survive the error.
+    expect(screen.getByLabelText("論文標題")).toHaveValue("   ");
+
+    // And the title itself was never changed.
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
     expect(screen.getByText("Guidelines for Human-AI Interaction")).toBeInTheDocument();
   });
 
