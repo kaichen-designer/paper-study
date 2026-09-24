@@ -157,7 +157,7 @@ export default function PaperCard({
       {confirming && (
         <div role="alertdialog" className="paper-card-confirm">
           <p>
-            將永久刪除這篇論文與它的 {noteCount} 筆筆記與畫記,無法復原。
+            將永久刪除這篇論文、它的 {noteCount} 筆筆記與畫記,以及所有反思對話紀錄,無法復原。
           </p>
           <button type="button" onClick={handlePurge}>
             確定永久刪除

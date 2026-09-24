@@ -108,6 +108,7 @@ describe("PaperCard", () => {
 
     expect(purgePaperMock).not.toHaveBeenCalled();
     expect(screen.getByRole("alertdialog")).toHaveTextContent("12");
+    expect(screen.getByRole("alertdialog")).toHaveTextContent("反思對話");
 
     fireEvent.click(screen.getByRole("button", { name: "確定永久刪除" }));
     await waitFor(() => expect(purgePaperMock).toHaveBeenCalled());
