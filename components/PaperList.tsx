@@ -7,7 +7,17 @@ import { READING_STAGES, STAGE_LABELS } from "@/lib/papers/reading-stage";
 import PaperCard from "./PaperCard";
 import TrashToggle from "./TrashToggle";
 
-export type PaperWithFileUrl = Paper & { fileUrl: string };
+export type PaperWithFileUrl = Paper & { fileUrl: string | null };
+
+// A missing entry (paper not counted, e.g. it isn't in the trash) still
+// defaults to 0 — noteCount is only ever displayed for a removed paper's
+// purge confirmation. An explicit `null` (the count failed to load) must
+// survive this lookup rather than being coalesced away, so `??` (which
+// treats null and undefined alike) is deliberately not used here.
+function lookupNoteCount(noteCounts: Record<string, number | null>, paperId: string): number | null {
+  const value = noteCounts[paperId];
+  return value === undefined ? 0 : value;
+}
 
 export default function PaperList({
   papers,
@@ -16,7 +26,7 @@ export default function PaperList({
 }: {
   papers: PaperWithFileUrl[];
   deletedPapers: PaperWithFileUrl[];
-  noteCounts: Record<string, number>;
+  noteCounts: Record<string, number | null>;
 }) {
   const router = useRouter();
   const [showingTrash, setShowingTrash] = useState(false);
@@ -36,7 +46,7 @@ export default function PaperList({
               <PaperCard
                 key={paper.id}
                 paper={paper}
-                noteCount={noteCounts[paper.id] ?? 0}
+                noteCount={lookupNoteCount(noteCounts, paper.id)}
                 onChanged={refresh}
               />
             ))}
@@ -50,7 +60,11 @@ export default function PaperList({
     return (
       <>
         <TrashToggle showingTrash={false} onToggle={() => setShowingTrash(true)} count={deletedPapers.length} />
-        <p>尚未上傳任何論文,使用上方表單上傳第一份 PDF 開始閱讀。</p>
+        {deletedPapers.length === 0 ? (
+          <p>尚未上傳任何論文,使用上方表單上傳第一份 PDF 開始閱讀。</p>
+        ) : (
+          <p>所有論文都在回收筒裡。點上方的回收筒查看或還原。</p>
+        )}
       </>
     );
   }
@@ -71,7 +85,7 @@ export default function PaperList({
                 <PaperCard
                   key={paper.id}
                   paper={paper}
-                  noteCount={noteCounts[paper.id] ?? 0}
+                  noteCount={lookupNoteCount(noteCounts, paper.id)}
                   onChanged={refresh}
                 />
               ))}

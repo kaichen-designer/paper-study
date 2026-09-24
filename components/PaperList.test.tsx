@@ -89,6 +89,22 @@ describe("PaperList", () => {
     expect(screen.getByText(/尚未上傳/)).toBeInTheDocument();
   });
 
+  // IMPORTANT 7: once every paper has been trashed, papers.length === 0
+  // no longer means "never uploaded" — the user just removed their last
+  // paper, and the trash toggle right above proves it.
+  it("shows a different empty message when every paper is in the trash, not the never-uploaded message", () => {
+    render(
+      <PaperList
+        papers={[]}
+        deletedPapers={[{ ...base, id: "d1", title: "D1" }]}
+        noteCounts={{}}
+      />
+    );
+    expect(screen.queryByText(/尚未上傳/)).not.toBeInTheDocument();
+    expect(screen.getByText(/所有論文都在回收筒裡/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /回收筒/ })).toBeInTheDocument();
+  });
+
   // Replaces the old "links each paper to its reading view by id" test.
   // The <Link> now lives inside PaperCard (owned and tested by
   // PaperCard.test.tsx); PaperCard is mocked in this file, so its href can't
