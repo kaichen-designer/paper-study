@@ -22,14 +22,22 @@ export default async function LibraryPage() {
       }))
     );
 
-  // Counts back the permanent-deletion confirmation, which has to say
-  // what goes with the paper.
-  const { data: noteRows } = await supabase.from("notes").select("paper_id");
+  // The count is only ever shown in the permanent-deletion confirmation,
+  // which is reachable only for a paper already in the trash — so only
+  // those need counting. An exact head count fetches no rows at all,
+  // which also puts it out of reach of the server's default row cap: a
+  // truncated count here would understate what a user is about to
+  // destroy irreversibly.
   const noteCounts: Record<string, number> = {};
-  for (const row of noteRows ?? []) {
-    const id = (row as { paper_id: string }).paper_id;
-    noteCounts[id] = (noteCounts[id] ?? 0) + 1;
-  }
+  await Promise.all(
+    deletedPapers.map(async (paper) => {
+      const { count } = await supabase
+        .from("notes")
+        .select("*", { count: "exact", head: true })
+        .eq("paper_id", paper.id);
+      noteCounts[paper.id] = count ?? 0;
+    })
+  );
 
   return (
     <main>
