@@ -76,4 +76,64 @@ describe("translateWithGemini", () => {
 
     expect(result.ok).toBe(false);
   });
+
+  describe("model fallback", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+    });
+
+    const busy = { ok: false, status: 503, text: async () => "overloaded" };
+    const translated = {
+      ok: true,
+      json: async () => ({ candidates: [{ content: { parts: [{ text: "你好世界" }] } }] }),
+    };
+
+    it("falls back to gemini-3.6-flash with the same prompt after gemini-3.1-flash-lite exhausts 503s", async () => {
+      vi.useFakeTimers();
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      const fetchMock = vi.fn(async (url: string) =>
+        String(url).includes("gemini-3.1-flash-lite") ? busy : translated
+      );
+      vi.stubGlobal("fetch", fetchMock);
+
+      const pending = translateWithGemini({ text: "hello world", targetLang: "ZH", apiKey: "k" });
+      await vi.advanceTimersByTimeAsync(20000);
+      const result = await pending;
+
+      expect(result).toEqual({ ok: true, text: "你好世界" });
+      expect(fetchMock).toHaveBeenCalledTimes(6);
+      const calls = fetchMock.mock.calls as unknown as [string, RequestInit][];
+      calls.slice(0, 5).forEach(([url]) => expect(url).toContain("gemini-3.1-flash-lite"));
+      expect(calls[5][0]).toContain("gemini-3.6-flash");
+      expect(calls[5][1].body).toBe(calls[0][1].body);
+    });
+
+    it("returns the friendly busy message when both models fail", async () => {
+      vi.useFakeTimers();
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(busy));
+
+      const pending = translateWithGemini({ text: "hello", targetLang: "ZH", apiKey: "k" });
+      await vi.advanceTimersByTimeAsync(20000);
+      const result = await pending;
+
+      expect(result).toEqual({
+        ok: false,
+        message: "Gemini 服務目前較為繁忙,請稍後再試。(HTTP 503)",
+      });
+    });
+
+    it("never touches gemini-3.6-flash when the primary model succeeds", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(translated);
+      vi.stubGlobal("fetch", fetchMock);
+
+      await translateWithGemini({ text: "hello", targetLang: "ZH", apiKey: "k" });
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(String(fetchMock.mock.calls[0][0])).not.toContain("gemini-3.6-flash");
+    });
+  });
 });
