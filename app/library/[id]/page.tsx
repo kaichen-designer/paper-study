@@ -21,7 +21,7 @@ export default async function PaperPage({ params }: { params: { id: string } }) 
   ]);
 
   return (
-    <main>
+    <main className="paper-reader-page">
       <Link href="/library" className="back-to-library">
         ← 回到論文庫
       </Link>

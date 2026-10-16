@@ -183,13 +183,25 @@ button:disabled {
 
 /* --- Paper reader layout --- */
 
+/* The reading page gets a wider container than the global 960px so the
+   paper and the translation panel can both be a readable width side by
+   side on a landscape tablet. Scoped by class so the library keeps 960px. */
+main.paper-reader-page {
+  max-width: 1280px;
+  padding-left: 0.75rem;
+  padding-right: 0.75rem;
+}
+
+/* Stacked (paper above translation) below 960px, side by side from 960px
+   up. 820/834px portrait tablets stay stacked: side by side they would
+   leave the PDF only ~420px wide. */
 .paper-reader {
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
+  gap: 1rem;
   background: var(--color-ink);
   border-radius: var(--radius-card);
-  padding: 1rem;
+  padding: 0.75rem;
 }
 
 .reading-status {
@@ -218,21 +230,18 @@ button:disabled {
   color: #7a7a75;
 }
 
-@media (min-width: 800px) {
+@media (min-width: 960px) {
   .paper-reader {
-    flex-direction: row;
-    align-items: flex-start;
-  }
-
-  .paper-reader > .pdf-viewer {
-    flex: 2;
-    min-width: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 11fr) minmax(380px, 9fr);
+    align-items: start;
   }
 
   .paper-reader > .translation-panel {
-    flex: 1;
     position: sticky;
-    top: 1rem;
+    top: 0.75rem;
+    max-height: calc(100vh - 1.5rem);
+    max-height: calc(100dvh - 1.5rem);
   }
 }
 
@@ -241,13 +250,25 @@ button:disabled {
   overflow: hidden;
 }
 
+/* Stacked: shorter than before (was 75vh) so the top of the translation
+   panel below it is still on screen without scrolling. The vh line is the
+   fallback for browsers without dvh. */
 .pdf-viewer-page {
-  max-height: 75vh;
+  max-height: 56vh;
+  max-height: 56dvh;
   overflow: auto;
   display: flex;
   justify-content: center;
   background: var(--color-ink-soft);
   padding: 1rem 0;
+}
+
+@media (min-width: 960px) {
+  /* Side by side: page plus its controls fit within one viewport. */
+  .pdf-viewer-page {
+    max-height: calc(100vh - 7rem);
+    max-height: calc(100dvh - 7rem);
+  }
 }
 
 .pdf-viewer-page .react-pdf__Page {
@@ -406,19 +427,68 @@ body.pen-mode-drawing textarea {
   min-height: 36px;
 }
 
+/* The panel is its own scroll container: a long translation scrolls inside
+   it instead of stretching the page into a tall, thin column. The top
+   padding lives on the sticky actions bar so scrolled text never shows
+   above it. */
 .translation-panel {
   background: var(--color-cream-card);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-card);
-  padding: 1rem;
+  padding: 0 1rem 1rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  max-height: 34vh;
+  max-height: 34dvh;
 }
 
-.translation-panel blockquote {
+.translation-panel-actions {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 1rem 0 0.75rem;
+  background: var(--color-cream-card);
+}
+
+.translation-panel-actions h2 {
+  flex: 0 0 100%;
+  margin: 0;
+}
+
+/* Two equal buttons on one row; they only wrap when the panel is narrower
+   than about 300px. nowrap stops a CJK label from breaking mid-word. */
+.translation-panel-actions button {
+  flex: 1 1 8rem;
+  min-height: 44px;
+  padding: 0.55rem 0.75rem;
+  white-space: nowrap;
+}
+
+.translation-panel-source {
   margin: 0 0 0.75rem;
   padding-left: 0.75rem;
   border-left: 3px solid #d0d0cc;
   color: #555;
-  font-size: 0.9rem;
+  font-size: 0.875rem;
+  line-height: 1.6;
+  max-height: 6.5rem;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+}
+
+/* pre-line keeps the newlines the translation provider returns without
+   changing the component's data contract (one text node). */
+.translation-panel-result {
+  margin: 0 0 0.75em;
+  max-width: 34em;
+  font-size: 1.0625rem;
+  line-height: 1.85;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
 }
 
 /* --- Notes --- */
@@ -428,7 +498,8 @@ body.pen-mode-drawing textarea {
   border: 1px solid #e5e5e0;
   border-radius: 8px;
   padding: 1rem;
-  margin: 1.5rem 0 1rem;
+  margin: 1.5rem auto 1rem;
+  max-width: 48rem;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
@@ -436,7 +507,8 @@ body.pen-mode-drawing textarea {
 
 .note-list {
   list-style: none;
-  margin: 0;
+  margin: 0 auto;
+  max-width: 48rem;
   padding: 0;
   display: flex;
   flex-direction: column;
@@ -458,6 +530,45 @@ body.pen-mode-drawing textarea {
 
 .note-list li p:last-child {
   margin: 0;
+}
+
+/* --- Reflection chat --- */
+
+.reflection-chat {
+  max-width: 48rem;
+  margin: 1.5rem auto 0;
+  line-height: 1.75;
+}
+
+.reflection-chat ul {
+  list-style: none;
+  margin: 0 0 1rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.reflection-chat li {
+  max-width: 85%;
+  padding: 0.65rem 0.9rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+}
+
+.reflection-chat li p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.reflection-chat li[data-role="user"] {
+  align-self: flex-end;
+  background: #efe8d4;
+}
+
+.reflection-chat li[data-role="assistant"] {
+  align-self: flex-start;
+  background: var(--color-cream-card);
 }
 
 /* --- Login --- */

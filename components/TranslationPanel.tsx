@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type Status =
   | { kind: "idle" }
@@ -25,6 +25,17 @@ export default function TranslationPanel({
   paperId?: string;
 }) {
   const [status, setStatus] = useState<Status>({ kind: "idle" });
+  const panelRef = useRef<HTMLElement>(null);
+
+  // The panel is its own scroll container (see .translation-panel in
+  // globals.css), so a new result must start from its beginning rather than
+  // wherever the previous, possibly longer, translation was scrolled to.
+  // Assigning scrollTop (not scrollTo) keeps this testable under jsdom.
+  useEffect(() => {
+    if (status.kind === "success" && panelRef.current) {
+      panelRef.current.scrollTop = 0;
+    }
+  }, [status]);
 
   async function translate(text: string) {
     setStatus({ kind: "loading" });
@@ -49,24 +60,30 @@ export default function TranslationPanel({
   }
 
   return (
-    <aside className="translation-panel">
-      <h2>翻譯</h2>
-      <button
-        type="button"
-        onClick={() => selectedText && translate(selectedText)}
-        disabled={!selectedText}
-      >
-        {status.kind === "loading" ? "翻譯中…" : "翻譯選取範圍"}
-      </button>
-      <button
-        type="button"
-        onClick={() => pageText && translate(pageText)}
-        disabled={!pageText}
-      >
-        {status.kind === "loading" ? "翻譯中…" : "翻譯整頁"}
-      </button>
-      {selectedText && <blockquote>{selectedText}</blockquote>}
-      {status.kind === "success" && <p>{status.translatedText}</p>}
+    <aside className="translation-panel" ref={panelRef}>
+      <div className="translation-panel-actions">
+        <h2>翻譯</h2>
+        <button
+          type="button"
+          onClick={() => selectedText && translate(selectedText)}
+          disabled={!selectedText}
+        >
+          {status.kind === "loading" ? "翻譯中…" : "翻譯選取範圍"}
+        </button>
+        <button
+          type="button"
+          onClick={() => pageText && translate(pageText)}
+          disabled={!pageText}
+        >
+          {status.kind === "loading" ? "翻譯中…" : "翻譯整頁"}
+        </button>
+      </div>
+      {selectedText && (
+        <blockquote className="translation-panel-source">{selectedText}</blockquote>
+      )}
+      {status.kind === "success" && (
+        <p className="translation-panel-result">{status.translatedText}</p>
+      )}
       {status.kind === "error" && <p role="alert">{status.message}</p>}
     </aside>
   );
