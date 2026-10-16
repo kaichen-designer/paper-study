@@ -43,11 +43,99 @@ function friendlyStatusMessage(status: number): string {
   return `Gemini 回應錯誤,請稍後再試。(HTTP ${status})`;
 }
 
-type RetryDeps = { sleep: (ms: number) => Promise<void> };
+// `now` feeds callGeminiWithFallback's time budget; tests inject a fake clock.
+type RetryDeps = { sleep: (ms: number) => Promise<void>; now?: () => number };
 
 const defaultRetryDeps: RetryDeps = {
   sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 };
+
+// Model fallback (callGeminiWithFallback only). The route that calls it
+// declares maxDuration = 60s; the budget leaves ~5s for the cache write and
+// response. The fallback model (gemini-3.6-flash) has been measured at
+// 25-38s for a one-sentence prompt, so its request is capped at 30s and
+// skipped entirely when less than 8s of budget remains.
+const OVERALL_BUDGET_MS = 55000;
+const FALLBACK_MAX_TIMEOUT_MS = 30000;
+const FALLBACK_MIN_TIMEOUT_MS = 8000;
+
+// Internal result of one model's full retry run. `transientExhausted` is true
+// only when the final failure was a retryable 5xx after all retries were
+// spent — the sole condition that justifies trying a different model.
+type AttemptResult =
+  | { ok: true; text: string }
+  | { ok: false; message: string; transientExhausted: boolean; status?: number };
+
+async function attemptModel({
+  prompt,
+  apiKey,
+  model,
+  maxRetries,
+  retryDeps,
+  timeoutMs,
+}: {
+  prompt: string;
+  apiKey: string;
+  model: string;
+  maxRetries: number;
+  retryDeps: RetryDeps;
+  timeoutMs?: number;
+}): Promise<AttemptResult> {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await fetch(endpointFor(model), {
+        method: "POST",
+        headers: {
+          "x-goog-api-key": apiKey,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+        ...(timeoutMs !== undefined && { signal: AbortSignal.timeout(timeoutMs) }),
+      });
+
+      if (!response.ok) {
+        const detail = await response.text().catch(() => "");
+        const transient = RETRYABLE_STATUS_CODES.has(response.status);
+
+        if (!transient || attempt === maxRetries) {
+          console.error(
+            `[callGemini] giving up on ${model} after ${attempt + 1} attempt(s): HTTP ${response.status}`,
+            detail
+          );
+          return {
+            ok: false,
+            message: friendlyStatusMessage(response.status),
+            transientExhausted: transient,
+            status: response.status,
+          };
+        }
+
+        await retryDeps.sleep(BASE_DELAY_MS * 2 ** attempt + Math.random() * JITTER_MS);
+        continue;
+      }
+
+      const body = (await response.json()) as {
+        candidates?: { content?: { parts?: { text?: string }[] } }[];
+      };
+      const text = body.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+
+      if (!text) {
+        return { ok: false, message: EMPTY_RESPONSE_MESSAGE, transientExhausted: false };
+      }
+
+      return { ok: true, text };
+    } catch (err) {
+      console.error(
+        `[callGemini] network exception on ${model} attempt ${attempt + 1}:`,
+        err instanceof Error ? err.message : String(err)
+      );
+      return { ok: false, message: NETWORK_ERROR_MESSAGE, transientExhausted: false };
+    }
+  }
+
+  // Unreachable: the loop always returns on its final iteration (attempt === maxRetries).
+  throw new Error("callGemini: retry loop exited without a result");
+}
 
 /**
  * Shared low-level Gemini call, used by both lib/translation/gemini.ts and
@@ -89,51 +177,96 @@ export async function callGemini({
   model?: string;
   retryDeps?: RetryDeps;
 }): Promise<GeminiResult> {
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      const response = await fetch(endpointFor(model), {
-        method: "POST",
-        headers: {
-          "x-goog-api-key": apiKey,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
-      });
+  const result = await attemptModel({
+    prompt,
+    apiKey,
+    model,
+    maxRetries: MAX_RETRIES,
+    retryDeps,
+  });
 
-      if (!response.ok) {
-        const detail = await response.text().catch(() => "");
+  // Rebuild the object so attemptModel's internal fields never reach callers.
+  return result.ok ? { ok: true, text: result.text } : { ok: false, message: result.message };
+}
 
-        if (!RETRYABLE_STATUS_CODES.has(response.status) || attempt === MAX_RETRIES) {
-          console.error(
-            `[callGemini] giving up after ${attempt + 1} attempt(s): HTTP ${response.status}`,
-            detail
-          );
-          return { ok: false, message: friendlyStatusMessage(response.status) };
-        }
+/**
+ * Like callGemini on `primaryModel`, but when the primary's transient 5xx
+ * (500/502/503/504) retries are all exhausted, makes ONE attempt on
+ * `fallbackModel` (no retries, no backoff). Overload (503) is usually a
+ * per-model capacity problem, so another model often still answers.
+ *
+ * Deliberately NOT a fallback for 429 (quota), 401/403, other 4xx, network
+ * exceptions or empty responses: switching models can't fix those, and the
+ * fallback model's free-tier daily quota is scarce (~20 req/day) and shared
+ * with reflection chat.
+ *
+ * Time is bounded so a route with maxDuration = 60s isn't cut off: the whole
+ * call has a 55s budget, the fallback request gets an abort timeout of
+ * min(30s, remaining budget), and the fallback is skipped when under 8s
+ * remain. If the fallback fails for any reason the PRIMARY model's friendly
+ * failure message is returned (the user never asked for, and shouldn't see
+ * errors from, the fallback model); the details go to the server log only.
+ *
+ * Never throws; same GeminiResult shape as callGemini.
+ */
+export async function callGeminiWithFallback({
+  prompt,
+  apiKey,
+  primaryModel,
+  fallbackModel,
+  retryDeps = defaultRetryDeps,
+}: {
+  prompt: string;
+  apiKey: string;
+  primaryModel: string;
+  fallbackModel: string;
+  retryDeps?: RetryDeps;
+}): Promise<GeminiResult> {
+  const now = retryDeps.now ?? Date.now;
+  const startedAt = now();
 
-        await retryDeps.sleep(BASE_DELAY_MS * 2 ** attempt + Math.random() * JITTER_MS);
-        continue;
-      }
+  const primary = await attemptModel({
+    prompt,
+    apiKey,
+    model: primaryModel,
+    maxRetries: MAX_RETRIES,
+    retryDeps,
+  });
+  if (primary.ok) return { ok: true, text: primary.text };
 
-      const body = (await response.json()) as {
-        candidates?: { content?: { parts?: { text?: string }[] } }[];
-      };
-      const text = body.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+  const primaryFailure: GeminiResult = { ok: false, message: primary.message };
+  if (!primary.transientExhausted) return primaryFailure;
 
-      if (!text) {
-        return { ok: false, message: EMPTY_RESPONSE_MESSAGE };
-      }
-
-      return { ok: true, text };
-    } catch (err) {
-      console.error(
-        `[callGemini] network exception on attempt ${attempt + 1}:`,
-        err instanceof Error ? err.message : String(err)
-      );
-      return { ok: false, message: NETWORK_ERROR_MESSAGE };
-    }
+  const remainingMs = OVERALL_BUDGET_MS - (now() - startedAt);
+  const timeoutMs = Math.min(FALLBACK_MAX_TIMEOUT_MS, remainingMs);
+  if (timeoutMs < FALLBACK_MIN_TIMEOUT_MS) {
+    console.warn(
+      `[callGemini] skipping fallback to ${fallbackModel} after ${primaryModel} failed with HTTP ${primary.status}: only ${remainingMs}ms of budget left`
+    );
+    return primaryFailure;
   }
 
-  // Unreachable: the loop always returns on its final iteration (attempt === MAX_RETRIES).
-  throw new Error("callGemini: retry loop exited without a result");
+  console.warn(
+    `[callGemini] primary model ${primaryModel} exhausted retries (HTTP ${primary.status}), falling back to ${fallbackModel}`
+  );
+  const fallback = await attemptModel({
+    prompt,
+    apiKey,
+    model: fallbackModel,
+    maxRetries: 0,
+    retryDeps,
+    timeoutMs,
+  });
+
+  if (fallback.ok) {
+    console.warn(
+      `[callGemini] fallback model ${fallbackModel} succeeded after primary model ${primaryModel} failed`
+    );
+    return { ok: true, text: fallback.text };
+  }
+
+  console.error(
+    `[callGemini] fallback model ${fallbackModel} failed after primary model ${primaryModel} failed: ${fallback.message}`
+  );
+  return primaryFailure;
 }
