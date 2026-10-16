@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import TranslationPanel from "./TranslationPanel";
 
@@ -75,6 +75,143 @@ describe("TranslationPanel", () => {
       text: "this is the whole page text",
       targetLang: "ZH",
       paperId: "p1",
+    });
+  });
+
+  describe("height adjustment handle (reader-layout: Translation Panel Height Adjustment)", () => {
+    const STORAGE_KEY = "translation-panel-height";
+
+    // jsdom has no layout, so every element measures 0 tall. Pin the panel
+    // to the 300px the spec examples start from.
+    beforeEach(() => {
+      window.localStorage.clear();
+      vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+        height: 300,
+        width: 400,
+        top: 0,
+        left: 0,
+        right: 400,
+        bottom: 300,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      } as DOMRect);
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+      window.localStorage.clear();
+    });
+
+    function renderPanel() {
+      const utils = render(<TranslationPanel selectedText="hello" paperId="p1" />);
+      const handle = screen.getByRole("separator", { name: "調整翻譯面板高度" });
+      return { ...utils, handle };
+    }
+
+    function drag(handle: Element, deltaY: number) {
+      fireEvent.pointerDown(handle, { clientY: 500, pointerId: 1 });
+      fireEvent.pointerMove(handle, { clientY: 500 + deltaY, pointerId: 1 });
+      fireEvent.pointerUp(handle, { clientY: 500 + deltaY, pointerId: 1 });
+    }
+
+    it("exposes a horizontal separator with min, max and current height", () => {
+      const { handle } = renderPanel();
+
+      expect(handle).toHaveAttribute("aria-orientation", "horizontal");
+      expect(handle).toHaveAttribute("aria-valuemin", "200");
+      // 90 percent of jsdom's 768px-high window, rounded down.
+      expect(handle).toHaveAttribute("aria-valuemax", "691");
+      expect(handle).toHaveAttribute("aria-valuenow", "300");
+      expect(handle).toHaveAttribute("tabindex", "0");
+    });
+
+    it("is the last child of the scrolling panel, so it can stick to the bottom edge", () => {
+      const { container, handle } = renderPanel();
+      const panel = container.querySelector("aside.translation-panel")!;
+
+      expect(panel.lastElementChild).toBe(handle);
+      expect(handle).toHaveClass("translation-panel-resizer");
+    });
+
+    it("moves 24px per arrow key and jumps to the limits with End and Home", () => {
+      const { handle } = renderPanel();
+      const now = () => handle.getAttribute("aria-valuenow");
+
+      fireEvent.keyDown(handle, { key: "ArrowDown" });
+      expect(now()).toBe("324");
+      fireEvent.keyDown(handle, { key: "ArrowUp" });
+      expect(now()).toBe("300");
+      fireEvent.keyDown(handle, { key: "ArrowUp" });
+      expect(now()).toBe("276");
+      fireEvent.keyDown(handle, { key: "End" });
+      expect(now()).toBe("691");
+      fireEvent.keyDown(handle, { key: "Home" });
+      expect(now()).toBe("200");
+    });
+
+    it.each([
+      [80, 380, "within the limits"],
+      [-150, 200, "clamped to the minimum"],
+      [900, 691, "clamped to 90 percent of the viewport height"],
+    ])("a pointer drag of %i px gives %i px (%s) and stores it on release", (delta, expected) => {
+      const { handle } = renderPanel();
+
+      drag(handle, delta);
+
+      expect(handle).toHaveAttribute("aria-valuenow", String(expected));
+      expect(window.localStorage.getItem(STORAGE_KEY)).toBe(String(expected));
+    });
+
+    it("does not change the height on pointer moves that happen without a press", () => {
+      const { handle } = renderPanel();
+
+      fireEvent.pointerMove(handle, { clientY: 900, pointerId: 1 });
+
+      expect(handle).toHaveAttribute("aria-valuenow", "300");
+    });
+
+    it("applies the stored height when the panel is opened", async () => {
+      window.localStorage.setItem(STORAGE_KEY, "420");
+
+      const { handle } = renderPanel();
+
+      await waitFor(() => expect(handle).toHaveAttribute("aria-valuenow", "420"));
+    });
+
+    it.each(["abc", "50", "9999", ""])(
+      "ignores the stored value %j and keeps the default height",
+      (stored) => {
+        window.localStorage.setItem(STORAGE_KEY, stored);
+
+        const { handle } = renderPanel();
+
+        expect(handle).toHaveAttribute("aria-valuenow", "300");
+      }
+    );
+
+    it("keeps working when reading localStorage throws", () => {
+      vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+        throw new Error("denied");
+      });
+
+      const { handle } = renderPanel();
+
+      expect(handle).toHaveAttribute("aria-valuenow", "300");
+      fireEvent.keyDown(handle, { key: "ArrowDown" });
+      expect(handle).toHaveAttribute("aria-valuenow", "324");
+    });
+
+    it("still resizes, without showing an error, when writing localStorage throws", () => {
+      vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+        throw new Error("quota");
+      });
+
+      const { handle } = renderPanel();
+      drag(handle, 80);
+
+      expect(handle).toHaveAttribute("aria-valuenow", "380");
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     });
   });
 

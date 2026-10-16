@@ -240,8 +240,10 @@ main.paper-reader-page {
   .paper-reader > .translation-panel {
     position: sticky;
     top: 0.75rem;
-    max-height: calc(100vh - 1.5rem);
-    max-height: calc(100dvh - 1.5rem);
+    /* Default and ceiling are both 90% of the viewport, the same limit the
+       drag handle enforces, so the first drag never jumps the height. */
+    max-height: 90vh;
+    max-height: min(var(--translation-panel-height, 90dvh), 90dvh);
   }
 }
 
@@ -250,25 +252,16 @@ main.paper-reader-page {
   overflow: hidden;
 }
 
-/* Stacked: shorter than before (was 75vh) so the top of the translation
-   panel below it is still on screen without scrolling. The vh line is the
-   fallback for browsers without dvh. */
+/* The whole PDF page is shown at its natural height and the page itself
+   scrolls: no max-height and no scroll box of its own. A scroll box here
+   cropped the page and, nested inside the page scroll and the translation
+   panel, made it hard to swipe the page down. */
 .pdf-viewer-page {
-  max-height: 56vh;
-  max-height: 56dvh;
-  overflow: auto;
+  overflow: visible;
   display: flex;
   justify-content: center;
   background: var(--color-ink-soft);
   padding: 1rem 0;
-}
-
-@media (min-width: 960px) {
-  /* Side by side: page plus its controls fit within one viewport. */
-  .pdf-viewer-page {
-    max-height: calc(100vh - 7rem);
-    max-height: calc(100dvh - 7rem);
-  }
 }
 
 .pdf-viewer-page .react-pdf__Page {
@@ -430,16 +423,55 @@ body.pen-mode-drawing textarea {
 /* The panel is its own scroll container: a long translation scrolls inside
    it instead of stretching the page into a tall, thin column. The top
    padding lives on the sticky actions bar so scrolled text never shows
-   above it. */
+   above it. No overscroll-behavior: contain, so a swipe that reaches the
+   end of the panel carries on scrolling the page.
+
+   --translation-panel-height is set by TranslationPanel once the user
+   drags the handle (or a stored height is restored); without it the panel
+   keeps its default size. The vh lines are fallbacks for browsers without
+   dvh/min(). */
 .translation-panel {
   background: var(--color-cream-card);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-card);
-  padding: 0 1rem 1rem;
+  padding: 0 1rem 0;
   overflow-y: auto;
-  overscroll-behavior: contain;
+  height: var(--translation-panel-height, auto);
   max-height: 34vh;
-  max-height: 34dvh;
+  max-height: min(var(--translation-panel-height, 34dvh), 90dvh);
+}
+
+/* Drag handle pinned to the bottom edge of the scrolling panel. 44px tall
+   to be a reliable touch target; touch-action: none applies to the handle
+   only, so the rest of the panel still scrolls normally. */
+.translation-panel-resizer {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 44px;
+  margin: 0 -1rem;
+  background: var(--color-cream-card);
+  border-top: 1px solid var(--color-border);
+  border-radius: 0 0 var(--radius-card) var(--radius-card);
+  cursor: ns-resize;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.translation-panel-resizer:focus-visible {
+  outline: 2px solid var(--color-ink);
+  outline-offset: -2px;
+}
+
+.translation-panel-resizer-grip {
+  width: 3rem;
+  height: 5px;
+  border-radius: var(--radius-pill);
+  background: #b9b3a2;
 }
 
 .translation-panel-actions {
