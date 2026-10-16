@@ -2,6 +2,10 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { translateText } from "@/lib/translation/translate-text";
 
+// callGemini may wait ~15s across retries on a 503 (plus up to 5 round trips),
+// so raise the platform's default function timeout.
+export const maxDuration = 60;
+
 // GEMINI_API_KEY is intentionally read only here, server-side, and never
 // forwarded to the client in any response body or exposed via
 // NEXT_PUBLIC_*. This route is the only place that touches it.

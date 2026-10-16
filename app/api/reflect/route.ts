@@ -3,6 +3,10 @@ import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { listReflectionMessages } from "@/lib/reflection/queries";
 import { generateReflectionReply } from "@/lib/reflection/generate-reply";
 
+// callGemini may wait ~15s across retries on a 503 (plus up to 5 round trips),
+// so raise the platform's default function timeout.
+export const maxDuration = 60;
+
 // GEMINI_API_KEY is intentionally read only here, server-side, and never
 // forwarded to the client in any response body or exposed via
 // NEXT_PUBLIC_*. Shared with /api/translate — same key, same rule.
